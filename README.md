@@ -1,0 +1,269 @@
+# 中小学课后服务选课与教务监管平台
+
+一个面向毕业设计答辩、可运行且可一键验收的课后服务选课与教务监管系统。平台覆盖监管部门、学校管理员、教师和家长四类角色，贯通“学期规划—学校备案—课程排班—学生选课—请假考勤—纠错留痕—预警整改—课程评价—监管分析—操作审计”完整业务链。
+
+## 技术栈
+
+- 后端：Java 21、Spring Boot 4、Spring Security、MyBatis、Flyway
+- 数据库：MySQL 8.4
+- 前端：Vue 3、TypeScript、Vite、Pinia、Element Plus、ECharts
+- 认证：服务端 Session、HttpOnly 会话 Cookie、Cookie/Header CSRF
+
+## 已实现范围
+
+| 角色 | 主要能力 |
+| --- | --- |
+| 监管人员 | 管理学校与管理员账号、维护学期、审核学校服务计划、扫描监管预警、复核整改、查看跨校分析与脱敏评价、查询操作审计 |
+| 学校管理员 | 管理本校组织人员、服务计划、教室校历、课程开班、报名、课次调课、考勤、请假与纠错审批、整改、统计和审计 |
+| 教师 | 仅查看本人开班与课次，生成课次、登记考勤、审核本人课程请假、申请已完成考勤纠错 |
+| 家长 | 仅查看绑定学生，选课/退选、查看出勤、按未来课次请假、对具备完成课次的有效报名提交一次课程评价 |
+
+主要业务闭环：
+
+- 学校服务计划按 `草稿 → 已提交 → 已备案 → 已生效 → 已结束 → 已归档` 流转，退回时必须说明原因。
+- 开班可关联标准学期、备案计划和教室；发布与调课同时校验学期范围、计划状态、教室容量、教师冲突、教室冲突和停课校历。
+- 家长在开课前提交请假，批准结果自动预填考勤名单。
+- 已完成课次的考勤禁止直接覆盖；教师发起纠错、学校审批后，原值和新值写入不可变修订历史。
+- 监管扫描识别考勤逾期、未生成课次和低出勤率，并按“确认—整改—提交复核—关闭/退回”形成闭环。
+- 所有成功写操作保存去敏审计元数据，不记录请求正文或密码；家长评价在监管端自动去除学生、家长和评论明细。
+
+即时选课会同时校验：
+
+- 报名时间窗口
+- 课程启用状态，以及首节课尚未开始
+- 学生状态与家长绑定关系
+- 课程适用年级
+- 重复报名
+- 学生上课时间冲突
+- 剩余容量
+
+最后一个名额由数据库事务、固定加锁顺序和原子容量更新共同保护。
+
+学校管理员可在本校范围内纠正并取消单条报名；取消人和取消时间会保存在报名记录中。课次开始前不能登记考勤，提交时必须覆盖该课次的完整有效名单，完成后的考勤会锁定，避免无痕覆盖历史数据。
+
+## 一键验收
+
+环境要求：
+
+- JDK 21
+- Maven
+- Node.js `^22.18.0` 或 `>=24.11.0`
+- MySQL 8.4 安装在 `/opt/homebrew/opt/mysql@8.4`，或通过 `AFTER_SCHOOL_MYSQL84_HOME` 指定
+- `curl`、`jq`、`lsof`、`rsync`
+
+执行：
+
+```bash
+./scripts/verify.sh
+```
+
+验收脚本会自动：
+
+1. 运行后端测试，生成可执行 JAR 和 CycloneDX JSON SBOM。
+2. 运行前端测试、TypeScript 检查、生产构建和高危依赖审计。
+3. 在临时目录启动独立 MySQL 8.4，默认使用 `18306`，不会连接或修改本机 `3306` 数据库。
+4. 在空库执行生产迁移至 V10，再补入演示 V4/V8/V11，并验证 25 张业务表。
+5. 通过真实 HTTP Session 和 CSRF 跑通四角色权限、账号创建与改密、组织人员 CRUD、计划备案、资源排课、五类选课规则、最后名额并发、请假预填、考勤纠错、预警整改、评价、审计和 CSV 报表。
+6. 重启后端验证 Flyway 幂等性，退出时清理临时数据库和进程。
+
+如默认验收端口被占用，可覆盖：
+
+```bash
+AFTER_SCHOOL_VERIFY_SERVER_PORT=18082 \
+AFTER_SCHOOL_VERIFY_MYSQL_PORT=18307 \
+./scripts/verify.sh
+```
+
+## 本地运行
+
+### 1. 准备 MySQL 8.4
+
+在一个 MySQL 8.4 实例中创建本地数据库和最小权限账号：
+
+```sql
+CREATE DATABASE after_school_service
+  CHARACTER SET utf8mb4
+  COLLATE utf8mb4_0900_ai_ci;
+
+CREATE USER 'after_school'@'127.0.0.1'
+  IDENTIFIED BY 'replace-with-a-local-password';
+
+GRANT ALL PRIVILEGES ON after_school_service.*
+  TO 'after_school'@'127.0.0.1';
+```
+
+### 2. 启动后端
+
+演示模式会在生产功能迁移（当前至 V10）之外加载 V4 账号与基础数据、V8 全业务链虚构演示数据，以及 V11 简化登录凭据：
+
+```bash
+cd after-school-service-server
+
+export DB_URL='jdbc:mysql://127.0.0.1:3306/after_school_service?useUnicode=true&characterEncoding=UTF-8&connectionTimeZone=%2B08%3A00&forceConnectionTimeZoneToSession=true&allowPublicKeyRetrieval=true&useSSL=false'
+export DB_USERNAME='after_school'
+export DB_PASSWORD='replace-with-a-local-password'
+export SPRING_PROFILES_ACTIVE='demo'
+
+mvn spring-boot:run
+```
+
+后端默认地址为 `http://localhost:8081`。
+
+### 3. 启动前端
+
+```bash
+cd after-school-service-web
+npm ci
+VITE_API_PROXY_TARGET=http://localhost:8081 npm run dev
+```
+
+访问 `http://localhost:5173`。
+
+## 演示账号
+
+以下账号只在 `demo` 模式或显式加载 `db/demo` 时存在，统一密码为 `123456`：
+
+| 角色 | 用户名 |
+| --- | --- |
+| 监管人员 | `admin` |
+| 学校管理员 | `school_admin` |
+| 教师 | `teacher_wang` |
+| 家长 | `parent_chen` |
+| 第二所学校管理员 | `school_admin_2` |
+| 第二所学校教师 | `teacher_li` |
+| 第二所学校家长 | `parent_zhao` |
+
+所有学校、姓名、电话和编号均为虚构数据。
+
+## 数据库迁移
+
+- `db/migration/V1`：13 张组织、人员、课程、报名与教学核心表
+- `db/migration/V2`：四类角色参考数据
+- `db/migration/V3`：跨租户复合外键、考勤关联与并发索引加固
+- `db/demo/V4`：可选演示学校、账号与基础工作流数据
+- `db/migration/V5`：学期、服务计划、教室、校历、调课与资源冲突约束
+- `db/migration/V6`：请假、考勤纠错与不可变修订历史
+- `db/migration/V7`：监管预警、整改历史、操作审计与课程评价
+- `db/demo/V8`：可选的全面版毕业设计演示状态与待办数据
+- `db/migration/V9`：把监护历史引用与当前有效授权解耦
+- `db/migration/V10`：报名取消联动终止有效请假，同时保留既有审核轨迹
+- `db/demo/V11`：把演示监管账号调整为 `admin`，并统一使用便于答辩演示的简短密码
+
+默认和 `prod` 模式只加载生产迁移，在空库上依次执行 V1、V2、V3、V5、V6、V7、V9、V10，不创建任何学校、人员或演示账号；这两种模式保持 Flyway 严格顺序，不允许过期版本迁移。`demo` 模式额外加载 V4、V8、V11，并且仅在该 profile 中开启 Flyway out-of-order：因此同一数据库即使已先以默认或 `prod` 模式迁移到生产 V10，切换到 `demo` 后仍会补执行 V4、V8、V11。服务端会拒绝同时启用 `prod,demo`，也会在配置绑定和实际迁移前两次拒绝任何将生产 Flyway out-of-order 改为 `true` 的外部覆盖。
+
+V4、V8、V11 使用固定的虚构演示标识，只能写入空白或可随时丢弃的数据库。不要把 `demo` profile 指向已有真实业务数据的生产库；需要演示时，应新建独立数据库后再启动。
+
+## 生产部署（同源 Nginx）
+
+生产环境由 Nginx 统一对外提供 `https://after-school.example`：`/` 服务 Vue SPA，`/api/` 保留完整 URI 后代理到仅监听本机的 Spring Boot。前端代码使用相对基址 `/api`，因此生产构建时不需要设置 `VITE_API_PROXY_TARGET`；该变量只服务于 Vite 本地开发服务器。
+
+正式部署基线为 Ubuntu 24.04、systemd、Nginx、Java 21 和独立 MySQL 8.4。完整的账号、目录、凭据、发布、回滚、备份恢复、监控告警和上线门禁见 [`docs/production-runbook.md`](docs/production-runbook.md)。仅完成仓库构建不等于真实环境已经生产就绪。
+
+`prod` 默认只绑定 `127.0.0.1`，启用 Servlet 容器的 native 转发头处理，仅把 loopback 识别为内部代理，并始终为会话 Cookie 设置 `Secure`。Nginx 模板会在第一个可信边界把 `X-Forwarded-For` 覆盖为实际连接地址，不会把客户端自带的同名头追加到后端。这个信任边界的前提是只有同机 Nginx 能连接后端：不要将 Spring Boot 端口直接暴露到局域网或公网；如果前面另有负载均衡或 CDN，必须先用 Nginx `real_ip` 明确列出可信来源，再继续覆盖转发头。
+
+### 1. 构建后端与前端
+
+```bash
+cd /path/to/after-school-service
+
+cd after-school-service-server
+mvn -B clean verify
+cd ../after-school-service-web
+npm ci
+release_id="$(date -u +%Y%m%dT%H%M%SZ)-${RANDOM}"
+npm run build -- --base="/releases/${release_id}/"
+cd ..
+```
+
+构建完成后，可执行 JAR 位于 `after-school-service-server/target/`，前端唯一需要发布的内容是 `after-school-service-web/dist/`。
+
+### 2. 安装前端产物
+
+以下目录是 Nginx 专用静态根目录，不要将源码、`.env`、数据库脚本或服务器配置复制进去。安装脚本先把完整产物写入不可变版本目录，确认成功后再原子切换 `current` 符号链接；部署过程中不会出现新 HTML 引用尚未到位资源的窗口：
+
+```bash
+sudo ./scripts/install-web-release.sh \
+  after-school-service-web/dist \
+  "${release_id}"
+```
+
+生产构建的 Vite 基址包含同一个 `release_id`，因此已打开页面后续懒加载仍请求原版本 URL。安装脚本默认保留旧版本 7 天，再只清理超过宽限期且不是当前版本的目录；需要更长的客户端停留窗口时，可用第四个参数提高天数。新页面和 SPA 路由响应带 `Cache-Control: no-cache`，版本化哈希资源则可长期缓存。不要绕过脚本用 `rsync --delete` 原地覆盖 `current` 或 `releases`。
+
+### 3. 安装并验证 Nginx
+
+仓库内的 [`deploy/nginx/after-school-service.conf`](deploy/nginx/after-school-service.conf) 是可直接替换参数的 HTTPS 模板。它包含原子版本入口、旧版本资源宽限、HTML 重验证、SPA `try_files` 回退、`/api/` 原样代理、反向代理头和内部文件防护；当前系统没有 WebSocket 端点，不需要 `Upgrade` 配置。
+
+```bash
+sudo install -m 0644 \
+  deploy/nginx/after-school-service.conf \
+  /etc/nginx/conf.d/after-school-service.conf
+
+# 编辑已安装的文件：替换 after-school.example，并指向真实证书和私钥。
+sudoedit /etc/nginx/conf.d/after-school-service.conf
+
+# 只有语法和证书检查成功后才重载。
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+Nginx 应直接终止 HTTPS，且 `80` 端口只跳转到 HTTPS。模板中 `proxy_pass http://127.0.0.1:8081;` 末尾故意没有 `/`，否则 Spring Boot 收到的 `/api/...` 前缀会被删除。
+
+### 4. 启动后端
+
+生产环境不直接从交互 shell 长期运行 JAR。安装 [`deploy/systemd/after-school-service.service`](deploy/systemd/after-school-service.service)，从 [`deploy/config/after-school-service.conf.example`](deploy/config/after-school-service.conf.example) 创建非秘密 EnvironmentFile，并把数据库密码放入 systemd root-only credential。后端版本通过 [`scripts/install-server-release.sh`](scripts/install-server-release.sh) 安装到不可变目录；readiness 失败时恢复上一 JAR。
+
+`APP_CORS_ALLOWED_ORIGIN` 必须是用户在浏览器中访问的唯一公网 Origin，即“协议 + 域名 + 非默认端口”，不带路径或末尾 `/`。不要填写 `http://127.0.0.1:8081`。防火墙必须保持应用端口 `8081` 和管理端口 `8082` 不对局域网或公网开放。
+
+初始监管员通过一次性 systemd credential 创建，成功登录并修改密码后立即删除 credential 和 drop-in；不要把初始化密码保留在环境文件中。
+
+### 5. 验证同源交付与运行状态
+
+```bash
+# 应返回 308，Location 指向同域名 HTTPS。
+curl -I http://after-school.example/
+
+# SPA 首页和深层路由均应返回 index.html。
+curl -fsS https://after-school.example/ >/dev/null
+curl -fsS https://after-school.example/parent/enrollments >/dev/null
+
+# API 通过同一 Origin 访问，不暴露 8081。
+curl -fsS https://after-school.example/api/public/system-info | jq -e '.status == "ready"'
+
+# 防误配检查：隐藏文件必须被拒绝。
+test "$(curl -sS -o /dev/null -w '%{http_code}' https://after-school.example/.env)" = '403'
+```
+
+`/api/public/system-info` 只说明 HTTP 应用可响应。真实运行状态使用仅本机可达的 `/livez`、`/readyz` 和 `127.0.0.1:8082/actuator/prometheus`；readiness 包含数据库检查。部署完成后必须在服务器执行 [`scripts/check-production.sh`](scripts/check-production.sh)，它会验证系统版本、systemd、端口、TLS、安全头、CORS、指标和备份。
+
+`prod` 模式严格解析并要求唯一的 `sslMode=VERIFY_IDENTITY`、`connectionTimeZone=+08:00` 和 `forceConnectionTimeZoneToSession=true`，默认启用 Secure 会话 Cookie，并关闭 OpenAPI 页面。应用会按“账号 + 来源地址”对连续登录失败执行指数退避，Nginx 同时提供登录/API 两级限流和安全响应头。数据库密码和初始监管员密码不得写入仓库。首次登录后可从右上角修改密码；修改或重置密码会使旧会话失效。
+
+### 6. 备份、监控与回滚
+
+[`scripts/backup-mysql.sh`](scripts/backup-mysql.sh) 把 MySQL 8.4 在线导出直接压缩并用 age 公钥加密，明文 SQL 不落盘；[`scripts/restore-mysql-backup.sh`](scripts/restore-mysql-backup.sh) 只允许恢复到尚不存在的新库。systemd timer 默认每日备份、每 5 分钟检查 readiness 和备份新鲜度。
+
+正式公网前必须完成一次真实恢复演练、配置异机备份上传和外部 FAILED/RECOVERED 告警。后端用 [`scripts/select-server-release.sh`](scripts/select-server-release.sh) 回滚，前端用 [`scripts/select-web-release.sh`](scripts/select-web-release.sh) 选择旧版本。JAR 回滚不等于数据库迁移回滚；Flyway 变更必须向后兼容。
+
+仓库的 [CI 工作流](.github/workflows/verify.yml) 会重跑全量隔离验证，并使用 OWASP Dependency-Check 在 CVSS 7.0 及以上阻断后端已知漏洞。本地可在后端目录执行 `NVD_API_KEY='...' mvn clean verify -Psecurity`；NVD API key 只允许放在本地环境或 CI secret。
+
+## API 与目录
+
+开发模式下可访问：
+
+- OpenAPI JSON：`http://localhost:8081/v3/api-docs`
+- Swagger UI：`http://localhost:8081/swagger-ui/index.html`
+
+目录：
+
+```text
+after-school-service-server/  Spring Boot API、MyBatis 映射、Flyway 迁移
+after-school-service-web/     Vue 3 管理端与家长端
+deploy/nginx/                 同源 HTTPS 生产交付模板
+deploy/systemd/               后端、备份与健康检查 systemd 单元
+deploy/config/                无真实密钥的生产配置示例
+docs/production-runbook.md    Ubuntu 生产运行、恢复和故障处置手册
+scripts/verify.sh             隔离数据库的一键全链路验收
+```
+
+## 当前范围边界
+
+当前版本不包含学生独立登录、支付、微信小程序/原生 App、AI 推荐、消息通知和审批式候补队列；这些能力不影响本系统围绕选课、教务执行和教育监管的毕业设计主线。

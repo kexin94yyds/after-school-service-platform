@@ -1,0 +1,388 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.afterschool.platform.registration.EnrollmentMapper">
+    <resultMap id="student" type="com.afterschool.platform.registration.EnrollmentStudent">
+        <id property="id" column="id"/>
+        <result property="schoolId" column="school_id"/>
+        <result property="grade" column="grade"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
+    <resultMap id="offering" type="com.afterschool.platform.registration.EnrollmentOffering">
+        <id property="id" column="id"/>
+        <result property="schoolId" column="school_id"/>
+        <result property="targetGradeMin" column="target_grade_min"/>
+        <result property="targetGradeMax" column="target_grade_max"/>
+        <result property="weekDay" column="week_day"/>
+        <result property="startTime" column="start_time"/>
+        <result property="endTime" column="end_time"/>
+        <result property="startDate" column="start_date"/>
+        <result property="endDate" column="end_date"/>
+        <result property="enrollmentStart" column="enrollment_start"/>
+        <result property="enrollmentEnd" column="enrollment_end"/>
+        <result property="capacity" column="capacity"/>
+        <result property="enrolledCount" column="enrolled_count"/>
+        <result property="status" column="status"/>
+        <result property="courseStatus" column="course_status"/>
+    </resultMap>
+
+    <resultMap id="state" type="com.afterschool.platform.registration.EnrollmentState">
+        <id property="id" column="id"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
+    <resultMap id="record" type="com.afterschool.platform.registration.EnrollmentRecord">
+        <id property="id" column="id"/>
+        <result property="offeringId" column="offering_id"/>
+        <result property="studentId" column="student_id"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
+    <select id="guardianStudents" resultType="map">
+        SELECT st.id,
+               st.school_id AS schoolId,
+               s.school_name AS schoolName,
+               st.class_id AS classId,
+               c.class_name AS className,
+               c.grade,
+               st.student_no AS studentNo,
+               st.full_name AS fullName,
+               st.status,
+               sg.relationship,
+               sg.is_primary AS primaryGuardian
+        FROM student_guardian sg
+        JOIN guardian g ON g.id = sg.guardian_id
+        JOIN sys_user gu ON gu.id = g.user_id
+        JOIN student st ON st.id = sg.student_id
+                       AND st.school_id = gu.school_id
+        JOIN school s ON s.id = st.school_id
+        JOIN school_class c ON c.id = st.class_id
+        WHERE sg.guardian_id = #{guardianId}
+          AND sg.is_active = TRUE
+        ORDER BY sg.is_primary DESC, st.full_name
+    </select>
+
+    <select id="findGuardianStudent" resultMap="student">
+        SELECT st.id, st.school_id, c.grade, st.status
+        FROM student st
+        JOIN school_class c ON c.id = st.class_id
+        JOIN student_guardian sg ON sg.student_id = st.id
+        JOIN guardian g ON g.id = sg.guardian_id
+        JOIN sys_user gu ON gu.id = g.user_id
+                        AND gu.school_id = st.school_id
+        WHERE st.id = #{studentId}
+          AND sg.guardian_id = #{guardianId}
+          AND sg.is_active = TRUE
+    </select>
+
+    <select id="lockGuardianStudent" resultMap="student">
+        SELECT st.id, st.school_id, c.grade, st.status
+        FROM student st
+        JOIN school_class c ON c.id = st.class_id
+        JOIN student_guardian sg ON sg.student_id = st.id
+        JOIN guardian g ON g.id = sg.guardian_id
+        JOIN sys_user gu ON gu.id = g.user_id
+                        AND gu.school_id = st.school_id
+        WHERE st.id = #{studentId}
+          AND sg.guardian_id = #{guardianId}
+          AND sg.is_active = TRUE
+        FOR UPDATE
+    </select>
+
+    <select id="lockSchoolStudent" resultType="long">
+        SELECT id
+        FROM student
+        WHERE id = #{studentId}
+          AND school_id = #{schoolId}
+        FOR UPDATE
+    </select>
+
+    <sql id="offeringRuleColumns">
+        o.id,
+        o.school_id,
+        c.target_grade_min,
+        c.target_grade_max,
+        o.week_day,
+        o.start_time,
+        o.end_time,
+        o.start_date,
+        o.end_date,
+        o.enrollment_start,
+        o.enrollment_end,
+        o.capacity,
+        o.enrolled_count,
+        o.status,
+        c.status AS course_status
+    </sql>
+
+    <select id="findOffering" resultMap="offering">
+        SELECT <include refid="offeringRuleColumns"/>
+        FROM course_offering o
+        JOIN course c ON c.id = o.course_id
+        WHERE o.id = #{offeringId}
+    </select>
+
+    <select id="lockOffering" resultMap="offering">
+        SELECT <include refid="offeringRuleColumns"/>
+        FROM course_offering o
+        JOIN course c ON c.id = o.course_id
+        WHERE o.id = #{offeringId}
+        FOR UPDATE
+    </select>
+
+    <select id="findEnrollmentState" resultMap="state">
+        SELECT id, status
+        FROM enrollment
+        WHERE offering_id = #{offeringId}
+          AND student_id = #{studentId}
+    </select>
+
+    <select id="countScheduleConflicts" resultType="int">
+        SELECT COUNT(*)
+        FROM enrollment e
+        JOIN course_offering existing ON existing.id = e.offering_id
+        JOIN course_offering candidate ON candidate.id = #{offeringId}
+        WHERE e.student_id = #{studentId}
+          AND e.status = 'ENROLLED'
+          AND e.offering_id != #{offeringId}
+          AND existing.week_day = candidate.week_day
+          AND existing.start_date &lt;= candidate.end_date
+          AND existing.end_date &gt;= candidate.start_date
+          AND existing.start_time &lt; candidate.end_time
+          AND existing.end_time &gt; candidate.start_time
+          AND existing.status NOT IN ('CANCELED', 'FINISHED')
+    </select>
+
+    <update id="incrementCapacity">
+        UPDATE course_offering
+        SET enrolled_count = enrolled_count + 1,
+            version = version + 1
+        WHERE id = #{offeringId}
+          AND status = 'PUBLISHED'
+          AND enrolled_count &lt; capacity
+    </update>
+
+    <update id="decrementCapacity">
+        UPDATE course_offering
+        SET enrolled_count = enrolled_count - 1,
+            version = version + 1
+        WHERE id = #{offeringId}
+          AND enrolled_count > 0
+    </update>
+
+    <insert id="insertEnrollment">
+        INSERT INTO enrollment (school_id, offering_id, student_id, guardian_id)
+        VALUES (#{schoolId}, #{offeringId}, #{studentId}, #{guardianId})
+    </insert>
+
+    <update id="reactivateEnrollment">
+        UPDATE enrollment
+        SET guardian_id = #{guardianId},
+            status = 'ENROLLED',
+            enrolled_at = CURRENT_TIMESTAMP(3),
+            canceled_at = NULL,
+            canceled_by = NULL
+        WHERE id = #{id}
+          AND status = 'CANCELED'
+    </update>
+
+    <update id="cancelEnrollment">
+        UPDATE enrollment
+        SET status = 'CANCELED',
+            canceled_at = CURRENT_TIMESTAMP(3),
+            canceled_by = #{canceledBy}
+        WHERE id = #{id}
+          AND status = 'ENROLLED'
+          <if test="guardianId != null">
+              AND guardian_id = #{guardianId}
+              AND EXISTS (
+                  SELECT 1
+                  FROM student_guardian sg
+                  WHERE sg.student_id = enrollment.student_id
+                    AND sg.guardian_id = enrollment.guardian_id
+                    AND sg.is_active = TRUE
+              )
+          </if>
+          <if test="schoolId != null">
+              AND school_id = #{schoolId}
+          </if>
+    </update>
+
+    <update id="withdrawActiveLeavesForEnrollment">
+        UPDATE leave_request
+        SET status = 'WITHDRAWN',
+            withdrawn_by = #{withdrawnBy},
+            withdrawn_at = CURRENT_TIMESTAMP(3)
+        WHERE school_id = #{schoolId}
+          AND offering_id = #{offeringId}
+          AND student_id = #{studentId}
+          AND status IN ('PENDING', 'APPROVED')
+    </update>
+
+    <select id="findScopedEnrollment" resultMap="record">
+        SELECT e.id, e.offering_id, e.student_id, e.status
+        FROM enrollment e
+        JOIN student_guardian sg
+          ON sg.student_id = e.student_id
+         AND sg.guardian_id = e.guardian_id
+         AND sg.is_active = TRUE
+        WHERE e.id = #{id}
+          AND e.guardian_id = #{guardianId}
+          AND e.school_id = (
+              SELECT u.school_id
+              FROM guardian g
+              JOIN sys_user u ON u.id = g.user_id
+              WHERE g.id = #{guardianId}
+          )
+    </select>
+
+    <select id="findSchoolEnrollment" resultMap="record">
+        SELECT id, offering_id, student_id, status
+        FROM enrollment
+        WHERE id = #{id}
+          AND school_id = #{schoolId}
+    </select>
+
+    <select id="lockScopedEnrollment" resultMap="record">
+        SELECT e.id, e.offering_id, e.student_id, e.status
+        FROM enrollment e
+        JOIN student_guardian sg
+          ON sg.student_id = e.student_id
+         AND sg.guardian_id = e.guardian_id
+         AND sg.is_active = TRUE
+        WHERE e.id = #{id}
+          AND e.guardian_id = #{guardianId}
+          AND e.school_id = (
+              SELECT u.school_id
+              FROM guardian g
+              JOIN sys_user u ON u.id = g.user_id
+              WHERE g.id = #{guardianId}
+          )
+        FOR UPDATE
+    </select>
+
+    <select id="lockSchoolEnrollment" resultMap="record">
+        SELECT id, offering_id, student_id, status
+        FROM enrollment
+        WHERE id = #{id}
+          AND school_id = #{schoolId}
+        FOR UPDATE
+    </select>
+
+    <sql id="enrollmentColumns">
+        e.id,
+        e.school_id AS schoolId,
+        s.school_name AS schoolName,
+        e.offering_id AS offeringId,
+        o.offering_code AS offeringCode,
+        o.term,
+        c.course_name AS courseName,
+        o.teacher_id AS teacherId,
+        t.full_name AS teacherName,
+        o.week_day AS weekDay,
+        o.start_time AS startTime,
+        o.end_time AS endTime,
+        e.student_id AS studentId,
+        st.student_no AS studentNo,
+        st.full_name AS studentName,
+        e.guardian_id AS guardianId,
+        g.full_name AS guardianName,
+        e.status,
+        e.enrolled_at AS enrolledAt,
+        e.canceled_at AS canceledAt,
+        e.canceled_by AS canceledBy,
+        canceler.display_name AS canceledByName
+    </sql>
+
+    <select id="findEnrollmentView" resultType="map">
+        SELECT <include refid="enrollmentColumns"/>
+        FROM enrollment e
+        JOIN school s ON s.id = e.school_id
+        JOIN course_offering o ON o.id = e.offering_id
+        JOIN course c ON c.id = o.course_id
+        JOIN teacher t ON t.id = o.teacher_id
+        JOIN student st ON st.id = e.student_id
+        JOIN guardian g ON g.id = e.guardian_id
+        LEFT JOIN sys_user canceler ON canceler.id = e.canceled_by
+        WHERE e.offering_id = #{offeringId}
+          AND e.student_id = #{studentId}
+    </select>
+
+    <select id="listEnrollments" resultType="map">
+        SELECT <include refid="enrollmentColumns"/>
+        FROM enrollment e
+        JOIN school s ON s.id = e.school_id
+        JOIN course_offering o ON o.id = e.offering_id
+        JOIN course c ON c.id = o.course_id
+        JOIN teacher t ON t.id = o.teacher_id
+        JOIN student st ON st.id = e.student_id
+        JOIN guardian g ON g.id = e.guardian_id
+        <if test="guardianId != null">
+            JOIN student_guardian current_binding
+              ON current_binding.student_id = e.student_id
+             AND current_binding.guardian_id = e.guardian_id
+             AND current_binding.is_active = TRUE
+        </if>
+        LEFT JOIN sys_user canceler ON canceler.id = e.canceled_by
+        <where>
+            <if test="schoolId != null">e.school_id = #{schoolId}</if>
+            <if test="teacherId != null">AND o.teacher_id = #{teacherId}</if>
+            <if test="guardianId != null">AND e.guardian_id = #{guardianId}</if>
+        </where>
+        ORDER BY e.enrolled_at DESC, e.id DESC
+    </select>
+
+    <select id="listGuardianOfferings" resultType="map">
+        SELECT o.id,
+               o.school_id AS schoolId,
+               o.offering_code AS offeringCode,
+               o.term,
+               o.course_id AS courseId,
+               c.course_name AS courseName,
+               c.category,
+               c.target_grade_min AS targetGradeMin,
+               c.target_grade_max AS targetGradeMax,
+               t.full_name AS teacherName,
+               o.week_day AS weekDay,
+               o.start_time AS startTime,
+               o.end_time AS endTime,
+               o.start_date AS startDate,
+               o.end_date AS endDate,
+               o.enrollment_start AS enrollmentStart,
+               o.enrollment_end AS enrollmentEnd,
+               o.capacity,
+               o.enrolled_count AS enrolledCount,
+               o.classroom,
+               o.status
+        FROM course_offering o
+        JOIN course c ON c.id = o.course_id
+        JOIN teacher t ON t.id = o.teacher_id
+        WHERE o.school_id = #{schoolId}
+          AND o.status = 'PUBLISHED'
+          AND c.status = 'ACTIVE'
+        ORDER BY c.category, c.course_name, o.week_day, o.start_time
+    </select>
+
+    <select id="listGuardianAttendance" resultType="map">
+        SELECT a.id,
+               a.student_id AS studentId,
+               c.course_name AS courseName,
+               o.offering_code AS offeringCode,
+               t.full_name AS teacherName,
+               ls.session_date AS sessionDate,
+               ls.start_time AS startTime,
+               ls.end_time AS endTime,
+               a.status,
+               a.remark,
+               a.recorded_at AS recordedAt
+        FROM attendance a
+        JOIN lesson_session ls ON ls.id = a.session_id
+        JOIN course_offering o ON o.id = a.offering_id
+        JOIN course c ON c.id = o.course_id
+        JOIN teacher t ON t.id = o.teacher_id
+        WHERE a.student_id = #{studentId}
+        ORDER BY ls.session_date DESC, ls.start_time DESC
+    </select>
+</mapper>

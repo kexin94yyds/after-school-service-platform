@@ -1,0 +1,236 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.afterschool.platform.teaching.TeachingMapper">
+    <resultMap id="schedule" type="com.afterschool.platform.teaching.OfferingSchedule">
+        <id property="id" column="id"/>
+        <result property="schoolId" column="school_id"/>
+        <result property="teacherId" column="teacher_id"/>
+        <result property="termId" column="term_id"/>
+        <result property="weekDay" column="week_day"/>
+        <result property="startDate" column="start_date"/>
+        <result property="endDate" column="end_date"/>
+        <result property="startTime" column="start_time"/>
+        <result property="endTime" column="end_time"/>
+        <result property="classroom" column="classroom"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
+    <resultMap id="lessonOwner" type="com.afterschool.platform.teaching.LessonOwner">
+        <id property="id" column="id"/>
+        <result property="schoolId" column="school_id"/>
+        <result property="offeringId" column="offering_id"/>
+        <result property="teacherId" column="teacher_id"/>
+        <result property="sessionDate" column="session_date"/>
+        <result property="startTime" column="start_time"/>
+        <result property="status" column="status"/>
+        <result property="offeringStatus" column="offering_status"/>
+    </resultMap>
+
+    <select id="findOfferingSchedule" resultMap="schedule">
+        SELECT id, school_id, teacher_id, term_id, week_day, start_date, end_date,
+               start_time, end_time, classroom, status
+        FROM course_offering
+        WHERE id = #{offeringId}
+    </select>
+
+    <select id="lockOfferingSchedule" resultMap="schedule">
+        SELECT id, school_id, teacher_id, term_id, week_day, start_date, end_date,
+               start_time, end_time, classroom, status
+        FROM course_offering
+        WHERE id = #{offeringId}
+        FOR UPDATE
+    </select>
+
+    <select id="listClosedCalendarDates" resultType="java.time.LocalDate">
+        SELECT event_date
+        FROM school_calendar_event
+        WHERE school_id = #{schoolId}
+          AND term_id = #{termId}
+          AND day_type IN ('HOLIDAY', 'SUSPENDED')
+          AND event_date BETWEEN #{startDate} AND #{endDate}
+        ORDER BY event_date
+    </select>
+
+    <select id="listAppliedRescheduleOriginalDates" resultType="java.time.LocalDate">
+        SELECT DISTINCT a.original_session_date
+        FROM schedule_adjustment a
+        JOIN lesson_session ls
+          ON ls.id = a.session_id
+         AND ls.school_id = a.school_id
+        WHERE ls.offering_id = #{offeringId}
+          AND a.status = 'APPLIED'
+        ORDER BY a.original_session_date
+    </select>
+
+    <insert id="insertSession">
+        INSERT INTO lesson_session (
+            school_id, offering_id, session_date, start_time, end_time, classroom
+        ) VALUES (
+            #{schoolId}, #{offeringId}, #{sessionDate}, #{startTime}, #{endTime}, #{classroom}
+        )
+        ON DUPLICATE KEY UPDATE id = id
+    </insert>
+
+    <select id="listSessions" resultType="map">
+        SELECT ls.id,
+               ls.school_id AS schoolId,
+               ls.offering_id AS offeringId,
+               o.offering_code AS offeringCode,
+               c.course_name AS courseName,
+               t.full_name AS teacherName,
+               ls.session_date AS sessionDate,
+               ls.start_time AS startTime,
+               ls.end_time AS endTime,
+               ls.classroom,
+               ls.status,
+               ls.notes,
+               COUNT(a.id) AS recordedCount,
+               SUM(CASE WHEN a.status IN ('PRESENT', 'LATE') THEN 1 ELSE 0 END) AS attendedCount
+        FROM lesson_session ls
+        JOIN course_offering o ON o.id = ls.offering_id
+        JOIN course c ON c.id = o.course_id
+        JOIN teacher t ON t.id = o.teacher_id
+        LEFT JOIN attendance a ON a.session_id = ls.id
+        WHERE ls.offering_id = #{offeringId}
+        GROUP BY ls.id, ls.school_id, ls.offering_id, o.offering_code,
+                 c.course_name, t.full_name, ls.session_date, ls.start_time,
+                 ls.end_time, ls.classroom, ls.status, ls.notes
+        ORDER BY ls.session_date, ls.start_time
+    </select>
+
+    <select id="findLessonOwner" resultMap="lessonOwner">
+        SELECT ls.id, ls.school_id, ls.offering_id, o.teacher_id,
+               ls.session_date, ls.start_time, ls.status,
+               o.status AS offering_status
+        FROM lesson_session ls
+        JOIN course_offering o ON o.id = ls.offering_id
+        WHERE ls.id = #{sessionId}
+    </select>
+
+    <select id="lockLessonOwner" resultMap="lessonOwner">
+        SELECT ls.id, ls.school_id, ls.offering_id,
+               ls.session_date, ls.start_time, ls.status
+        FROM lesson_session ls
+        WHERE ls.id = #{sessionId}
+        FOR UPDATE
+    </select>
+
+    <select id="findLessonOfferingId" resultType="long">
+        SELECT offering_id
+        FROM lesson_session
+        WHERE id = #{sessionId}
+    </select>
+
+    <select id="lockOfferingAccess" resultMap="lessonOwner">
+        SELECT id AS offering_id, school_id, teacher_id,
+               status AS offering_status
+        FROM course_offering
+        WHERE id = #{offeringId}
+        FOR UPDATE
+    </select>
+
+    <select id="countSessionAttendance" resultType="int">
+        SELECT COUNT(*)
+        FROM attendance
+        WHERE session_id = #{sessionId}
+    </select>
+
+    <update id="updateSession">
+        UPDATE lesson_session
+        SET status = #{status}
+            <if test="notes != null">, notes = #{notes}</if>
+        WHERE id = #{sessionId}
+    </update>
+
+    <select id="listAttendance" resultType="map">
+        SELECT st.id AS studentId,
+               st.student_no AS studentNo,
+               st.full_name AS studentName,
+               sc.class_name AS className,
+               a.id,
+               COALESCE(
+                   a.status,
+                   CASE WHEN lr.status = 'APPROVED' THEN 'LEAVE' END
+               ) AS status,
+               a.status AS recordedStatus,
+               a.remark,
+               a.recorded_at AS recordedAt,
+               u.display_name AS recordedByName,
+               lr.id AS leaveRequestId,
+               lr.reason AS leaveReason,
+               lr.reviewed_at AS leaveApprovedAt
+        FROM lesson_session ls
+        JOIN enrollment e
+          ON e.offering_id = ls.offering_id
+         AND (
+             (
+                 e.enrolled_at &lt;= TIMESTAMP(ls.session_date, ls.start_time)
+                 AND (
+                     e.canceled_at IS NULL
+                     OR e.canceled_at &gt;= TIMESTAMP(ls.session_date, ls.start_time)
+                 )
+             )
+             OR EXISTS (
+                 SELECT 1
+                 FROM attendance historic
+                 WHERE historic.session_id = ls.id
+                   AND historic.student_id = e.student_id
+             )
+         )
+        JOIN student st ON st.id = e.student_id
+        JOIN school_class sc ON sc.id = st.class_id
+        LEFT JOIN attendance a ON a.session_id = ls.id AND a.student_id = st.id
+        LEFT JOIN sys_user u ON u.id = a.recorded_by
+        LEFT JOIN leave_request lr
+          ON lr.session_id = ls.id
+         AND lr.student_id = st.id
+         AND lr.status = 'APPROVED'
+        WHERE ls.id = #{sessionId}
+          AND (ls.status != 'COMPLETED' OR a.id IS NOT NULL)
+        ORDER BY sc.grade, sc.class_name, st.student_no
+    </select>
+
+    <select id="countAttendanceEligible" resultType="int">
+        SELECT CASE WHEN EXISTS (
+            SELECT 1
+            FROM lesson_session ls
+            JOIN enrollment e
+              ON e.offering_id = ls.offering_id
+             AND e.student_id = #{studentId}
+            WHERE ls.id = #{sessionId}
+              AND ls.offering_id = #{offeringId}
+              AND (
+                  (
+                      e.enrolled_at &lt;= TIMESTAMP(ls.session_date, ls.start_time)
+                      AND (
+                          e.canceled_at IS NULL
+                          OR e.canceled_at &gt;= TIMESTAMP(ls.session_date, ls.start_time)
+                      )
+                  )
+                  OR EXISTS (
+                      SELECT 1
+                      FROM attendance historic
+                      WHERE historic.session_id = ls.id
+                        AND historic.student_id = e.student_id
+                  )
+              )
+        ) THEN 1 ELSE 0 END
+    </select>
+
+    <insert id="upsertAttendance">
+        INSERT INTO attendance (
+            school_id, offering_id, session_id, student_id,
+            status, recorded_by, remark, recorded_at
+        ) VALUES (
+            #{schoolId}, #{offeringId}, #{sessionId}, #{studentId},
+            #{status}, #{recordedBy}, #{remark}, CURRENT_TIMESTAMP(3)
+        )
+        ON DUPLICATE KEY UPDATE
+            status = VALUES(status),
+            recorded_by = VALUES(recorded_by),
+            remark = VALUES(remark),
+            recorded_at = CURRENT_TIMESTAMP(3)
+    </insert>
+</mapper>

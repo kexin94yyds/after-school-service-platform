@@ -1,0 +1,252 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.afterschool.platform.people.PeopleMapper">
+    <insert id="insertUser" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO sys_user (
+            school_id, role_id, username, password_hash, display_name, mobile, enabled
+        ) VALUES (
+            #{schoolId},
+            (SELECT id FROM sys_role WHERE role_code = #{roleCode}),
+            #{username},
+            #{passwordHash},
+            #{displayName},
+            #{mobile},
+            #{enabled}
+        )
+    </insert>
+
+    <update id="updateUserProfile">
+        UPDATE sys_user
+        SET username = #{username},
+            display_name = #{displayName},
+            mobile = #{mobile},
+            enabled = #{enabled}
+            <if test="passwordHash != null">, password_hash = #{passwordHash}</if>
+        WHERE id = #{userId}
+    </update>
+
+    <sql id="teacherColumns">
+        t.id,
+        t.school_id AS schoolId,
+        s.school_name AS schoolName,
+        t.user_id AS userId,
+        u.username,
+        t.teacher_no AS teacherNo,
+        t.full_name AS fullName,
+        t.phone,
+        t.title,
+        t.status,
+        u.last_login_at AS lastLoginAt
+    </sql>
+
+    <select id="listTeachers" resultType="map">
+        SELECT <include refid="teacherColumns"/>
+        FROM teacher t
+        JOIN school s ON s.id = t.school_id
+        JOIN sys_user u ON u.id = t.user_id
+        <if test="schoolId != null">WHERE t.school_id = #{schoolId}</if>
+        ORDER BY t.full_name, t.id
+    </select>
+
+    <select id="findTeacherByNo" resultType="map">
+        SELECT <include refid="teacherColumns"/>
+        FROM teacher t
+        JOIN school s ON s.id = t.school_id
+        JOIN sys_user u ON u.id = t.user_id
+        WHERE t.school_id = #{schoolId}
+          AND t.teacher_no = #{teacherNo}
+    </select>
+
+    <insert id="insertTeacher">
+        INSERT INTO teacher (
+            school_id, user_id, teacher_no, full_name, phone, title, status
+        )
+        VALUES (
+            #{schoolId}, #{userId}, #{teacherNo}, #{fullName}, #{phone}, #{title}, #{status}
+        )
+    </insert>
+
+    <update id="updateTeacher">
+        UPDATE teacher
+        SET teacher_no = #{teacherNo},
+            full_name = #{fullName},
+            phone = #{phone},
+            title = #{title},
+            status = #{status}
+        WHERE id = #{id}
+          AND school_id = #{schoolId}
+    </update>
+
+    <select id="teacherUserId" resultType="long">
+        SELECT user_id
+        FROM teacher
+        WHERE id = #{id}
+          AND school_id = #{schoolId}
+    </select>
+
+    <sql id="studentColumns">
+        st.id,
+        st.school_id AS schoolId,
+        s.school_name AS schoolName,
+        st.class_id AS classId,
+        c.class_name AS className,
+        c.grade,
+        c.school_year AS schoolYear,
+        st.student_no AS studentNo,
+        st.full_name AS fullName,
+        st.gender,
+        st.date_of_birth AS dateOfBirth,
+        st.status
+    </sql>
+
+    <select id="listStudents" resultType="map">
+        SELECT <include refid="studentColumns"/>
+        FROM student st
+        JOIN school s ON s.id = st.school_id
+        JOIN school_class c ON c.id = st.class_id
+        <if test="schoolId != null">WHERE st.school_id = #{schoolId}</if>
+        ORDER BY c.grade, c.class_name, st.student_no
+    </select>
+
+    <select id="findStudentByNo" resultType="map">
+        SELECT <include refid="studentColumns"/>
+        FROM student st
+        JOIN school s ON s.id = st.school_id
+        JOIN school_class c ON c.id = st.class_id
+        WHERE st.school_id = #{schoolId}
+          AND st.student_no = #{studentNo}
+    </select>
+
+    <select id="classExists" resultType="int">
+        SELECT COUNT(*)
+        FROM school_class
+        WHERE id = #{classId}
+          AND school_id = #{schoolId}
+          AND status = 'ACTIVE'
+    </select>
+
+    <insert id="insertStudent">
+        INSERT INTO student (
+            school_id, class_id, student_no, full_name, gender, date_of_birth, status
+        ) VALUES (
+            #{schoolId}, #{classId}, #{studentNo}, #{fullName}, #{gender}, #{dateOfBirth}, #{status}
+        )
+    </insert>
+
+    <update id="updateStudent">
+        UPDATE student
+        SET class_id = #{classId},
+            student_no = #{studentNo},
+            full_name = #{fullName},
+            gender = #{gender},
+            date_of_birth = #{dateOfBirth},
+            status = #{status}
+        WHERE id = #{id}
+          AND school_id = #{schoolId}
+    </update>
+
+    <sql id="guardianColumns">
+        g.id,
+        u.school_id AS schoolId,
+        s.school_name AS schoolName,
+        g.user_id AS userId,
+        u.username,
+        g.full_name AS fullName,
+        g.mobile,
+        g.status,
+        GROUP_CONCAT(st.full_name ORDER BY st.full_name SEPARATOR '、') AS childNames,
+        GROUP_CONCAT(st.id ORDER BY st.id) AS studentIds,
+        MIN(sg.relationship) AS relationship,
+        MAX(sg.is_primary) AS `primary`
+    </sql>
+
+    <select id="listGuardians" resultType="map">
+        SELECT <include refid="guardianColumns"/>
+        FROM guardian g
+        JOIN sys_user u ON u.id = g.user_id
+        JOIN school s ON s.id = u.school_id
+        LEFT JOIN student_guardian sg
+          ON sg.guardian_id = g.id
+         AND sg.is_active = TRUE
+        LEFT JOIN student st ON st.id = sg.student_id
+        <if test="schoolId != null">WHERE u.school_id = #{schoolId}</if>
+        GROUP BY g.id, u.school_id, s.school_name, g.user_id, u.username,
+                 g.full_name, g.mobile, g.status
+        ORDER BY g.full_name, g.id
+    </select>
+
+    <select id="findGuardianByUsername" resultType="map">
+        SELECT <include refid="guardianColumns"/>
+        FROM guardian g
+        JOIN sys_user u ON u.id = g.user_id
+        JOIN school s ON s.id = u.school_id
+        LEFT JOIN student_guardian sg
+          ON sg.guardian_id = g.id
+         AND sg.is_active = TRUE
+        LEFT JOIN student st ON st.id = sg.student_id
+        WHERE u.school_id = #{schoolId}
+          AND u.username = #{username}
+        GROUP BY g.id, u.school_id, s.school_name, g.user_id, u.username,
+                 g.full_name, g.mobile, g.status
+    </select>
+
+    <select id="countStudentsInSchool" resultType="int">
+        SELECT COUNT(*)
+        FROM student
+        WHERE school_id = #{schoolId}
+          AND status = 'ACTIVE'
+          AND id IN
+          <foreach collection="studentIds" item="studentId" open="(" separator="," close=")">
+              #{studentId}
+          </foreach>
+    </select>
+
+    <insert id="insertGuardian" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO guardian (user_id, full_name, mobile, status)
+        VALUES (#{userId}, #{fullName}, #{mobile}, #{status})
+    </insert>
+
+    <insert id="insertGuardianBinding">
+        INSERT INTO student_guardian (
+            student_id, guardian_id, relationship, is_primary, is_active
+        ) VALUES (
+            #{studentId}, #{guardianId}, #{relationship}, #{primary}, TRUE
+        )
+        ON DUPLICATE KEY UPDATE
+            relationship = VALUES(relationship),
+            is_primary = VALUES(is_primary),
+            is_active = TRUE
+    </insert>
+
+    <select id="guardianUserId" resultType="long">
+        SELECT g.user_id
+        FROM guardian g
+        JOIN sys_user u ON u.id = g.user_id
+        WHERE g.id = #{id}
+          AND u.school_id = #{schoolId}
+    </select>
+
+    <update id="updateGuardian">
+        UPDATE guardian g
+        JOIN sys_user u ON u.id = g.user_id
+        SET g.full_name = #{fullName},
+            g.mobile = #{mobile},
+            g.status = #{status}
+        WHERE g.id = #{id}
+          AND u.school_id = #{schoolId}
+    </update>
+
+    <update id="deactivateGuardianBindingsExcept">
+        UPDATE student_guardian
+        SET is_active = FALSE,
+            is_primary = FALSE
+        WHERE guardian_id = #{guardianId}
+          AND is_active = TRUE
+          AND student_id NOT IN
+          <foreach collection="studentIds" item="studentId" open="(" separator="," close=")">
+              #{studentId}
+          </foreach>
+    </update>
+</mapper>

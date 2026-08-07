@@ -1,0 +1,11 @@
+# Non-secret settings for after-school-backup.service.
+# Install as /etc/after-school-service/after-school-backup.conf with mode 0640.
+
+MYSQL_DATABASE=after_school_service
+BACKUP_DIR=/var/backups/after-school-service
+BACKUP_RETENTION_DAYS=30
+
+# Optional absolute executable. It receives two arguments: encrypted backup
+# path and checksum path. A non-zero exit marks the backup unit failed while
+# preserving the completed local backup.
+BACKUP_UPLOAD_HOOK=

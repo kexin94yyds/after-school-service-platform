@@ -1,0 +1,12 @@
+[Unit]
+Description=Check after-school service health every five minutes
+
+[Timer]
+OnCalendar=*:0/5
+RandomizedDelaySec=30s
+AccuracySec=30s
+Persistent=true
+Unit=after-school-healthcheck.service
+
+[Install]
+WantedBy=timers.target

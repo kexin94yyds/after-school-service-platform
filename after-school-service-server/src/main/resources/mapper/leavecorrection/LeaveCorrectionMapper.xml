@@ -1,0 +1,642 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.afterschool.platform.leavecorrection.LeaveCorrectionMapper">
+    <resultMap id="sessionContext"
+               type="com.afterschool.platform.leavecorrection.SessionWorkflowContext">
+        <result property="schoolId" column="school_id"/>
+        <result property="offeringId" column="offering_id"/>
+        <result property="sessionId" column="session_id"/>
+        <result property="teacherId" column="teacher_id"/>
+        <result property="sessionDate" column="session_date"/>
+        <result property="startTime" column="start_time"/>
+        <result property="sessionStatus" column="session_status"/>
+        <result property="offeringStatus" column="offering_status"/>
+    </resultMap>
+
+    <resultMap id="leaveRecord"
+               type="com.afterschool.platform.leavecorrection.LeaveRequestRecord">
+        <id property="id" column="id"/>
+        <result property="schoolId" column="school_id"/>
+        <result property="offeringId" column="offering_id"/>
+        <result property="sessionId" column="session_id"/>
+        <result property="studentId" column="student_id"/>
+        <result property="guardianId" column="guardian_id"/>
+        <result property="teacherId" column="teacher_id"/>
+        <result property="submittedBy" column="submitted_by"/>
+        <result property="sessionDate" column="session_date"/>
+        <result property="startTime" column="start_time"/>
+        <result property="sessionStatus" column="session_status"/>
+        <result property="offeringStatus" column="offering_status"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
+    <resultMap id="correctionRecord"
+               type="com.afterschool.platform.leavecorrection.AttendanceCorrectionRecord">
+        <id property="id" column="id"/>
+        <result property="schoolId" column="school_id"/>
+        <result property="offeringId" column="offering_id"/>
+        <result property="sessionId" column="session_id"/>
+        <result property="attendanceId" column="attendance_id"/>
+        <result property="studentId" column="student_id"/>
+        <result property="teacherId" column="teacher_id"/>
+        <result property="requestedBy" column="requested_by"/>
+        <result property="requestedStatus" column="requested_status"/>
+        <result property="requestedRemark" column="requested_remark"/>
+        <result property="reason" column="reason"/>
+        <result property="status" column="status"/>
+        <result property="sessionDate" column="session_date"/>
+        <result property="startTime" column="start_time"/>
+        <result property="sessionStatus" column="session_status"/>
+        <result property="offeringStatus" column="offering_status"/>
+        <result property="attendanceStatus" column="attendance_status"/>
+        <result property="attendanceRemark" column="attendance_remark"/>
+        <result property="attendanceRecordedBy" column="attendance_recorded_by"/>
+        <result property="attendanceRecordedAt" column="attendance_recorded_at"/>
+    </resultMap>
+
+    <sql id="sessionContextColumns">
+        ls.school_id,
+        ls.offering_id,
+        ls.id AS session_id,
+        o.teacher_id,
+        ls.session_date,
+        ls.start_time,
+        ls.status AS session_status,
+        o.status AS offering_status
+    </sql>
+
+    <select id="findSessionContext" resultMap="sessionContext">
+        SELECT <include refid="sessionContextColumns"/>
+        FROM lesson_session ls
+        JOIN course_offering o
+          ON o.id = ls.offering_id
+         AND o.school_id = ls.school_id
+        WHERE ls.id = #{sessionId}
+    </select>
+
+    <select id="lockOfferingContext" resultMap="sessionContext">
+        SELECT school_id,
+               id AS offering_id,
+               teacher_id,
+               status AS offering_status
+        FROM course_offering
+        WHERE id = #{offeringId}
+        FOR UPDATE
+    </select>
+
+    <select id="lockSessionContext" resultMap="sessionContext">
+        SELECT school_id,
+               offering_id,
+               id AS session_id,
+               session_date,
+               start_time,
+               status AS session_status
+        FROM lesson_session
+        WHERE id = #{sessionId}
+        FOR UPDATE
+    </select>
+
+    <select id="lockGuardianStudentBinding" resultType="long">
+        SELECT st.id
+        FROM student st
+        JOIN school_class c ON c.id = st.class_id
+        JOIN student_guardian sg ON sg.student_id = st.id
+        JOIN guardian g ON g.id = sg.guardian_id
+        JOIN sys_user gu
+          ON gu.id = g.user_id
+         AND gu.school_id = st.school_id
+        WHERE st.id = #{studentId}
+          AND st.school_id = #{schoolId}
+          AND sg.guardian_id = #{guardianId}
+          AND sg.is_active = TRUE
+        FOR UPDATE
+    </select>
+
+    <select id="listGuardianLeaveSessions" resultType="map">
+        SELECT ls.id,
+               ls.school_id AS schoolId,
+               s.school_name AS schoolName,
+               ls.offering_id AS offeringId,
+               o.offering_code AS offeringCode,
+               c.course_name AS courseName,
+               ls.session_date AS sessionDate,
+               ls.start_time AS startTime,
+               ls.end_time AS endTime,
+               ls.classroom,
+               ls.status,
+               lr.id AS activeLeaveRequestId,
+               lr.status AS activeLeaveStatus,
+               lr.reason AS activeLeaveReason
+        FROM lesson_session ls
+        JOIN course_offering o
+          ON o.id = ls.offering_id
+         AND o.school_id = ls.school_id
+        JOIN course c
+          ON c.id = o.course_id
+         AND c.school_id = o.school_id
+        JOIN school s ON s.id = ls.school_id
+        JOIN enrollment e
+          ON e.school_id = ls.school_id
+         AND e.offering_id = ls.offering_id
+         AND e.student_id = #{studentId}
+        JOIN student_guardian sg
+          ON sg.student_id = e.student_id
+         AND sg.guardian_id = #{guardianId}
+         AND sg.is_active = TRUE
+        JOIN guardian g
+          ON g.id = sg.guardian_id
+         AND g.status = 'ACTIVE'
+        JOIN sys_user gu
+          ON gu.id = g.user_id
+         AND gu.school_id = ls.school_id
+         AND gu.enabled = TRUE
+        LEFT JOIN leave_request lr
+          ON lr.session_id = ls.id
+         AND lr.student_id = e.student_id
+         AND lr.status IN ('PENDING', 'APPROVED')
+        WHERE ls.status = 'SCHEDULED'
+          AND o.status IN ('PUBLISHED', 'CLOSED')
+          AND TIMESTAMP(ls.session_date, ls.start_time) &gt; #{now}
+          AND e.enrolled_at &lt;= TIMESTAMP(ls.session_date, ls.start_time)
+          AND (
+              e.canceled_at IS NULL
+              OR e.canceled_at &gt;= TIMESTAMP(ls.session_date, ls.start_time)
+          )
+        ORDER BY ls.session_date, ls.start_time, ls.id
+    </select>
+
+    <select id="lockGuardianEligibleEnrollment" resultType="long">
+        SELECT e.id
+        FROM enrollment e
+        WHERE e.school_id = #{schoolId}
+          AND e.offering_id = #{offeringId}
+          AND e.student_id = #{studentId}
+          AND e.status = 'ENROLLED'
+          AND e.enrolled_at &lt;= #{sessionStartsAt}
+        FOR UPDATE
+    </select>
+
+    <select id="countActiveLeave" resultType="int">
+        SELECT COUNT(*)
+        FROM leave_request
+        WHERE session_id = #{sessionId}
+          AND student_id = #{studentId}
+          AND status IN ('PENDING', 'APPROVED')
+    </select>
+
+    <insert id="insertLeave"
+            useGeneratedKeys="true"
+            keyProperty="record.id">
+        INSERT INTO leave_request (
+            school_id, offering_id, session_id, student_id, guardian_id,
+            reason, status, submitted_by, submitted_at
+        ) VALUES (
+            #{record.schoolId}, #{record.offeringId}, #{record.sessionId},
+            #{record.studentId}, #{record.guardianId},
+            #{reason}, 'PENDING', #{submittedBy}, CURRENT_TIMESTAMP(3)
+        )
+    </insert>
+
+    <select id="findLeaveRecord" resultMap="leaveRecord">
+        SELECT lr.id,
+               lr.school_id,
+               lr.offering_id,
+               lr.session_id,
+               lr.student_id,
+               lr.guardian_id,
+               lr.submitted_by,
+               lr.status,
+               o.teacher_id,
+               o.status AS offering_status,
+               ls.session_date,
+               ls.start_time,
+               ls.status AS session_status
+        FROM leave_request lr
+        JOIN course_offering o
+          ON o.id = lr.offering_id
+         AND o.school_id = lr.school_id
+        JOIN lesson_session ls
+          ON ls.id = lr.session_id
+         AND ls.school_id = lr.school_id
+         AND ls.offering_id = lr.offering_id
+        WHERE lr.id = #{id}
+    </select>
+
+    <select id="lockLeaveRecord" resultMap="leaveRecord">
+        SELECT id, school_id, offering_id, session_id, student_id,
+               guardian_id, submitted_by, status
+        FROM leave_request
+        WHERE id = #{id}
+        FOR UPDATE
+    </select>
+
+    <select id="lockReviewableLeaveEnrollment" resultType="long">
+        SELECT e.id
+        FROM enrollment e
+        WHERE e.school_id = #{schoolId}
+          AND e.offering_id = #{offeringId}
+          AND e.student_id = #{studentId}
+          AND e.status = 'ENROLLED'
+        FOR UPDATE
+    </select>
+
+    <update id="withdrawLeave">
+        UPDATE leave_request
+        SET status = 'WITHDRAWN',
+            withdrawn_by = #{withdrawnBy},
+            withdrawn_at = CURRENT_TIMESTAMP(3)
+        WHERE id = #{id}
+          AND guardian_id = #{guardianId}
+          AND status = 'PENDING'
+    </update>
+
+    <update id="reviewLeave">
+        UPDATE leave_request
+        SET status = #{decision},
+            reviewed_by = #{reviewedBy},
+            reviewed_at = CURRENT_TIMESTAMP(3),
+            review_remark = #{reviewRemark}
+        WHERE id = #{id}
+          AND status = 'PENDING'
+    </update>
+
+    <sql id="leaveViewColumns">
+        lr.id,
+        lr.school_id AS schoolId,
+        s.school_name AS schoolName,
+        lr.offering_id AS offeringId,
+        o.offering_code AS offeringCode,
+        c.course_name AS courseName,
+        lr.session_id AS sessionId,
+        ls.session_date AS sessionDate,
+        ls.start_time AS startTime,
+        ls.end_time AS endTime,
+        lr.student_id AS studentId,
+        st.student_no AS studentNo,
+        st.full_name AS studentName,
+        lr.guardian_id AS guardianId,
+        g.full_name AS guardianName,
+        lr.reason,
+        lr.status,
+        lr.submitted_by AS submittedBy,
+        submitter.display_name AS submittedByName,
+        lr.submitted_at AS submittedAt,
+        lr.reviewed_by AS reviewedBy,
+        reviewer.display_name AS reviewedByName,
+        lr.reviewed_at AS reviewedAt,
+        lr.review_remark AS reviewRemark,
+        lr.withdrawn_by AS withdrawnBy,
+        withdrawer.display_name AS withdrawnByName,
+        lr.withdrawn_at AS withdrawnAt
+    </sql>
+
+    <select id="findLeaveView" resultType="map">
+        SELECT <include refid="leaveViewColumns"/>
+        FROM leave_request lr
+        JOIN school s ON s.id = lr.school_id
+        JOIN course_offering o ON o.id = lr.offering_id
+        JOIN course c ON c.id = o.course_id
+        JOIN lesson_session ls ON ls.id = lr.session_id
+        JOIN student st ON st.id = lr.student_id
+        JOIN guardian g ON g.id = lr.guardian_id
+        JOIN sys_user submitter ON submitter.id = lr.submitted_by
+        LEFT JOIN sys_user reviewer ON reviewer.id = lr.reviewed_by
+        LEFT JOIN sys_user withdrawer ON withdrawer.id = lr.withdrawn_by
+        WHERE lr.id = #{id}
+    </select>
+
+    <select id="listLeaveRequests" resultType="map">
+        SELECT <include refid="leaveViewColumns"/>
+        FROM leave_request lr
+        JOIN school s ON s.id = lr.school_id
+        JOIN course_offering o ON o.id = lr.offering_id
+        JOIN course c ON c.id = o.course_id
+        JOIN lesson_session ls ON ls.id = lr.session_id
+        JOIN student st ON st.id = lr.student_id
+        JOIN guardian g ON g.id = lr.guardian_id
+        <if test="guardianId != null">
+            JOIN student_guardian current_binding
+              ON current_binding.student_id = lr.student_id
+             AND current_binding.guardian_id = lr.guardian_id
+             AND current_binding.is_active = TRUE
+        </if>
+        JOIN sys_user submitter ON submitter.id = lr.submitted_by
+        LEFT JOIN sys_user reviewer ON reviewer.id = lr.reviewed_by
+        LEFT JOIN sys_user withdrawer ON withdrawer.id = lr.withdrawn_by
+        <where>
+            <if test="schoolId != null">AND lr.school_id = #{schoolId}</if>
+            <if test="teacherId != null">AND o.teacher_id = #{teacherId}</if>
+            <if test="guardianId != null">AND lr.guardian_id = #{guardianId}</if>
+            <if test="offeringId != null">AND lr.offering_id = #{offeringId}</if>
+            <if test="sessionId != null">AND lr.session_id = #{sessionId}</if>
+            <if test="status != null">AND lr.status = #{status}</if>
+        </where>
+        ORDER BY lr.submitted_at DESC, lr.id DESC
+    </select>
+
+    <select id="findCorrectionTarget" resultMap="correctionRecord">
+        SELECT a.school_id,
+               a.offering_id,
+               a.session_id,
+               a.id AS attendance_id,
+               a.student_id,
+               o.teacher_id,
+               o.status AS offering_status,
+               ls.session_date,
+               ls.start_time,
+               ls.status AS session_status,
+               a.status AS attendance_status,
+               a.remark AS attendance_remark,
+               a.recorded_by AS attendance_recorded_by,
+               a.recorded_at AS attendance_recorded_at
+        FROM attendance a
+        JOIN lesson_session ls
+          ON ls.id = a.session_id
+         AND ls.school_id = a.school_id
+         AND ls.offering_id = a.offering_id
+        JOIN course_offering o
+          ON o.id = a.offering_id
+         AND o.school_id = a.school_id
+        WHERE a.session_id = #{sessionId}
+          AND a.student_id = #{studentId}
+    </select>
+
+    <select id="findAttendanceTargetById" resultMap="correctionRecord">
+        SELECT a.school_id,
+               a.offering_id,
+               a.session_id,
+               a.id AS attendance_id,
+               a.student_id,
+               o.teacher_id,
+               o.status AS offering_status,
+               ls.session_date,
+               ls.start_time,
+               ls.status AS session_status,
+               a.status AS attendance_status,
+               a.remark AS attendance_remark,
+               a.recorded_by AS attendance_recorded_by,
+               a.recorded_at AS attendance_recorded_at
+        FROM attendance a
+        JOIN lesson_session ls
+          ON ls.id = a.session_id
+         AND ls.school_id = a.school_id
+         AND ls.offering_id = a.offering_id
+        JOIN course_offering o
+          ON o.id = a.offering_id
+         AND o.school_id = a.school_id
+        WHERE a.id = #{attendanceId}
+    </select>
+
+    <select id="lockAttendanceTarget" resultMap="correctionRecord">
+        SELECT school_id,
+               offering_id,
+               session_id,
+               id AS attendance_id,
+               student_id,
+               status AS attendance_status,
+               remark AS attendance_remark,
+               recorded_by AS attendance_recorded_by,
+               recorded_at AS attendance_recorded_at
+        FROM attendance
+        WHERE id = #{attendanceId}
+        FOR UPDATE
+    </select>
+
+    <select id="countActiveCorrection" resultType="int">
+        SELECT COUNT(*)
+        FROM attendance_correction_request
+        WHERE attendance_id = #{attendanceId}
+          AND status = 'PENDING'
+    </select>
+
+    <insert id="insertCorrection"
+            useGeneratedKeys="true"
+            keyProperty="record.id">
+        INSERT INTO attendance_correction_request (
+            school_id, offering_id, session_id, attendance_id, student_id,
+            requested_status, requested_remark, reason,
+            status, requested_by, requested_at
+        ) VALUES (
+            #{record.schoolId}, #{record.offeringId}, #{record.sessionId},
+            #{record.attendanceId}, #{record.studentId},
+            #{record.requestedStatus}, #{record.requestedRemark}, #{record.reason},
+            'PENDING', #{requestedBy}, CURRENT_TIMESTAMP(3)
+        )
+    </insert>
+
+    <select id="findCorrectionRecord" resultMap="correctionRecord">
+        SELECT cr.id,
+               cr.school_id,
+               cr.offering_id,
+               cr.session_id,
+               cr.attendance_id,
+               cr.student_id,
+               cr.requested_by,
+               cr.requested_status,
+               cr.requested_remark,
+               cr.reason,
+               cr.status,
+               o.teacher_id,
+               o.status AS offering_status,
+               ls.session_date,
+               ls.start_time,
+               ls.status AS session_status,
+               a.status AS attendance_status,
+               a.remark AS attendance_remark,
+               a.recorded_by AS attendance_recorded_by,
+               a.recorded_at AS attendance_recorded_at
+        FROM attendance_correction_request cr
+        JOIN course_offering o
+          ON o.id = cr.offering_id
+         AND o.school_id = cr.school_id
+        JOIN lesson_session ls
+          ON ls.id = cr.session_id
+         AND ls.school_id = cr.school_id
+         AND ls.offering_id = cr.offering_id
+        JOIN attendance a
+          ON a.id = cr.attendance_id
+         AND a.school_id = cr.school_id
+         AND a.session_id = cr.session_id
+         AND a.student_id = cr.student_id
+        WHERE cr.id = #{id}
+    </select>
+
+    <select id="lockCorrectionRecord" resultMap="correctionRecord">
+        SELECT id, school_id, offering_id, session_id, attendance_id,
+               student_id, requested_by, requested_status, requested_remark,
+               reason, status
+        FROM attendance_correction_request
+        WHERE id = #{id}
+        FOR UPDATE
+    </select>
+
+    <update id="cancelCorrection">
+        UPDATE attendance_correction_request
+        SET status = 'CANCELED',
+            canceled_by = #{canceledBy},
+            canceled_at = CURRENT_TIMESTAMP(3)
+        WHERE id = #{id}
+          AND requested_by = #{requestedBy}
+          AND status = 'PENDING'
+    </update>
+
+    <update id="rejectCorrection">
+        UPDATE attendance_correction_request
+        SET status = 'REJECTED',
+            reviewed_by = #{reviewedBy},
+            reviewed_at = CURRENT_TIMESTAMP(3),
+            review_remark = #{reviewRemark}
+        WHERE id = #{id}
+          AND status = 'PENDING'
+    </update>
+
+    <insert id="insertAttendanceRevision">
+        INSERT INTO attendance_revision (
+            school_id, offering_id, session_id, attendance_id,
+            correction_request_id, student_id,
+            old_status, new_status, old_remark, new_remark,
+            old_recorded_by, old_recorded_at, changed_by, changed_at
+        ) VALUES (
+            #{request.schoolId}, #{request.offeringId}, #{request.sessionId},
+            #{request.attendanceId}, #{request.id}, #{request.studentId},
+            #{attendance.attendanceStatus}, #{request.requestedStatus},
+            #{attendance.attendanceRemark}, #{request.requestedRemark},
+            #{attendance.attendanceRecordedBy}, #{attendance.attendanceRecordedAt},
+            #{changedBy}, CURRENT_TIMESTAMP(3)
+        )
+    </insert>
+
+    <update id="updateAttendanceFromCorrection">
+        UPDATE attendance
+        SET status = #{status},
+            remark = #{remark},
+            recorded_by = #{recordedBy},
+            recorded_at = CURRENT_TIMESTAMP(3)
+        WHERE id = #{attendanceId}
+    </update>
+
+    <update id="markCorrectionApplied">
+        UPDATE attendance_correction_request
+        SET status = 'APPLIED',
+            reviewed_by = #{reviewedBy},
+            reviewed_at = CURRENT_TIMESTAMP(3),
+            review_remark = #{reviewRemark},
+            applied_at = CURRENT_TIMESTAMP(3)
+        WHERE id = #{id}
+          AND status = 'PENDING'
+    </update>
+
+    <sql id="correctionViewColumns">
+        cr.id,
+        cr.school_id AS schoolId,
+        s.school_name AS schoolName,
+        cr.offering_id AS offeringId,
+        o.offering_code AS offeringCode,
+        c.course_name AS courseName,
+        cr.session_id AS sessionId,
+        ls.session_date AS sessionDate,
+        ls.start_time AS startTime,
+        cr.attendance_id AS attendanceId,
+        cr.student_id AS studentId,
+        st.student_no AS studentNo,
+        st.full_name AS studentName,
+        cr.requested_status AS requestedStatus,
+        cr.requested_remark AS requestedRemark,
+        cr.reason,
+        cr.status,
+        cr.requested_by AS requestedBy,
+        requester.display_name AS requestedByName,
+        cr.requested_at AS requestedAt,
+        cr.reviewed_by AS reviewedBy,
+        reviewer.display_name AS reviewedByName,
+        cr.reviewed_at AS reviewedAt,
+        cr.review_remark AS reviewRemark,
+        cr.applied_at AS appliedAt,
+        cr.canceled_by AS canceledBy,
+        canceler.display_name AS canceledByName,
+        cr.canceled_at AS canceledAt,
+        a.status AS currentAttendanceStatus,
+        a.remark AS currentAttendanceRemark
+    </sql>
+
+    <select id="findCorrectionView" resultType="map">
+        SELECT <include refid="correctionViewColumns"/>
+        FROM attendance_correction_request cr
+        JOIN school s ON s.id = cr.school_id
+        JOIN course_offering o ON o.id = cr.offering_id
+        JOIN course c ON c.id = o.course_id
+        JOIN lesson_session ls ON ls.id = cr.session_id
+        JOIN attendance a ON a.id = cr.attendance_id
+        JOIN student st ON st.id = cr.student_id
+        JOIN sys_user requester ON requester.id = cr.requested_by
+        LEFT JOIN sys_user reviewer ON reviewer.id = cr.reviewed_by
+        LEFT JOIN sys_user canceler ON canceler.id = cr.canceled_by
+        WHERE cr.id = #{id}
+    </select>
+
+    <select id="listCorrections" resultType="map">
+        SELECT <include refid="correctionViewColumns"/>
+        FROM attendance_correction_request cr
+        JOIN school s ON s.id = cr.school_id
+        JOIN course_offering o ON o.id = cr.offering_id
+        JOIN course c ON c.id = o.course_id
+        JOIN lesson_session ls ON ls.id = cr.session_id
+        JOIN attendance a ON a.id = cr.attendance_id
+        JOIN student st ON st.id = cr.student_id
+        JOIN sys_user requester ON requester.id = cr.requested_by
+        LEFT JOIN sys_user reviewer ON reviewer.id = cr.reviewed_by
+        LEFT JOIN sys_user canceler ON canceler.id = cr.canceled_by
+        <where>
+            <if test="schoolId != null">AND cr.school_id = #{schoolId}</if>
+            <if test="teacherId != null">AND o.teacher_id = #{teacherId}</if>
+            <if test="offeringId != null">AND cr.offering_id = #{offeringId}</if>
+            <if test="sessionId != null">AND cr.session_id = #{sessionId}</if>
+            <if test="status != null">AND cr.status = #{status}</if>
+        </where>
+        ORDER BY cr.requested_at DESC, cr.id DESC
+    </select>
+
+    <select id="countGuardianAttendanceAccess" resultType="int">
+        SELECT COUNT(*)
+        FROM attendance a
+        JOIN student_guardian sg
+          ON sg.student_id = a.student_id
+         AND sg.guardian_id = #{guardianId}
+         AND sg.is_active = TRUE
+        JOIN guardian g ON g.id = sg.guardian_id
+        JOIN sys_user gu
+          ON gu.id = g.user_id
+         AND gu.school_id = a.school_id
+        WHERE a.id = #{attendanceId}
+    </select>
+
+    <select id="listAttendanceRevisions" resultType="map">
+        SELECT ar.id,
+               ar.school_id AS schoolId,
+               ar.offering_id AS offeringId,
+               ar.session_id AS sessionId,
+               ar.attendance_id AS attendanceId,
+               ar.correction_request_id AS correctionRequestId,
+               ar.student_id AS studentId,
+               st.student_no AS studentNo,
+               st.full_name AS studentName,
+               ar.old_status AS oldStatus,
+               ar.new_status AS newStatus,
+               ar.old_remark AS oldRemark,
+               ar.new_remark AS newRemark,
+               ar.old_recorded_by AS oldRecordedBy,
+               old_recorder.display_name AS oldRecordedByName,
+               ar.old_recorded_at AS oldRecordedAt,
+               ar.changed_by AS changedBy,
+               changer.display_name AS changedByName,
+               ar.changed_at AS changedAt
+        FROM attendance_revision ar
+        JOIN student st ON st.id = ar.student_id
+        JOIN sys_user old_recorder ON old_recorder.id = ar.old_recorded_by
+        JOIN sys_user changer ON changer.id = ar.changed_by
+        WHERE ar.attendance_id = #{attendanceId}
+        ORDER BY ar.changed_at, ar.id
+    </select>
+</mapper>

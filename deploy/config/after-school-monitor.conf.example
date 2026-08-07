@@ -1,0 +1,11 @@
+# Non-secret settings for after-school-healthcheck.service.
+# Install as /etc/after-school-service/after-school-monitor.conf with mode 0640.
+
+BACKUP_DIR=/var/backups/after-school-service
+BACKUP_MAX_AGE_HOURS=36
+BACKUP_SERVICE_NAME=after-school-backup.service
+
+# Optional absolute executable owned by root and not writable by group/others.
+# It receives two arguments: state (FAILED or RECOVERED) and a short message.
+# Leave empty until email, enterprise chat or another alert channel is chosen.
+HEALTH_ALERT_HOOK=

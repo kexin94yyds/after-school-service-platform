@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.afterschool.platform.auth.UserAccountMapper">
+    <resultMap id="userAccount" type="com.afterschool.platform.auth.UserAccount">
+        <id property="id" column="id"/>
+        <result property="schoolId" column="school_id"/>
+        <result property="username" column="username"/>
+        <result property="passwordHash" column="password_hash"/>
+        <result property="displayName" column="display_name"/>
+        <result property="enabled" column="enabled"/>
+        <result property="roleCode" column="role_code"/>
+        <result property="teacherId" column="teacher_id"/>
+        <result property="guardianId" column="guardian_id"/>
+    </resultMap>
+
+    <select id="findByUsername" resultMap="userAccount">
+        SELECT u.id,
+               u.school_id,
+               u.username,
+               u.password_hash,
+               u.display_name,
+               u.enabled,
+               r.role_code,
+               t.id AS teacher_id,
+               g.id AS guardian_id
+        FROM sys_user u
+        JOIN sys_role r ON r.id = u.role_id AND r.enabled = TRUE
+        LEFT JOIN teacher t ON t.user_id = u.id AND t.status = 'ACTIVE'
+        LEFT JOIN guardian g ON g.user_id = u.id AND g.status = 'ACTIVE'
+        WHERE u.username = #{username}
+          AND (u.school_id IS NULL OR EXISTS (
+              SELECT 1
+              FROM school s
+              WHERE s.id = u.school_id
+                AND s.status = 'ACTIVE'
+          ))
+        LIMIT 1
+    </select>
+
+    <select id="findActiveById" resultMap="userAccount">
+        SELECT u.id,
+               u.school_id,
+               u.username,
+               u.password_hash,
+               u.display_name,
+               u.enabled,
+               r.role_code,
+               t.id AS teacher_id,
+               g.id AS guardian_id
+        FROM sys_user u
+        JOIN sys_role r ON r.id = u.role_id AND r.enabled = TRUE
+        LEFT JOIN teacher t ON t.user_id = u.id AND t.status = 'ACTIVE'
+        LEFT JOIN guardian g ON g.user_id = u.id AND g.status = 'ACTIVE'
+        WHERE u.id = #{id}
+          AND u.enabled = TRUE
+          AND (u.school_id IS NULL OR EXISTS (
+              SELECT 1 FROM school s
+              WHERE s.id = u.school_id AND s.status = 'ACTIVE'
+          ))
+          AND (
+              r.role_code != 'TEACHER'
+              OR EXISTS (
+                  SELECT 1 FROM teacher t
+                  WHERE t.user_id = u.id AND t.status = 'ACTIVE'
+              )
+          )
+          AND (
+              r.role_code != 'GUARDIAN'
+              OR EXISTS (
+                  SELECT 1 FROM guardian g
+                  WHERE g.user_id = u.id AND g.status = 'ACTIVE'
+              )
+          )
+    </select>
+
+    <update id="updateLastLogin">
+        UPDATE sys_user
+        SET last_login_at = CURRENT_TIMESTAMP(3)
+        WHERE id = #{id}
+    </update>
+
+    <update id="updatePassword">
+        UPDATE sys_user
+        SET password_hash = #{passwordHash}
+        WHERE id = #{id}
+          AND BINARY password_hash = BINARY #{expectedPasswordHash}
+          AND enabled = TRUE
+    </update>
+</mapper>

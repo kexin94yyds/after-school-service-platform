@@ -1,0 +1,15 @@
+.DS_Store
+.idea/
+.vscode/
+*.iml
+
+.env
+.env.*
+!.env.example
+
+after-school-service-server/target/
+after-school-service-web/node_modules/
+after-school-service-web/dist/
+
+*.log
+

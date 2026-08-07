@@ -1,0 +1,741 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.afterschool.platform.academic.AcademicMapper">
+    <resultMap id="academicTerm" type="com.afterschool.platform.academic.AcademicTerm">
+        <id property="id" column="id"/>
+        <result property="termCode" column="term_code"/>
+        <result property="termName" column="term_name"/>
+        <result property="startDate" column="start_date"/>
+        <result property="endDate" column="end_date"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
+    <resultMap id="servicePlan" type="com.afterschool.platform.academic.ServicePlan">
+        <id property="id" column="id"/>
+        <result property="schoolId" column="school_id"/>
+        <result property="termId" column="term_id"/>
+        <result property="planCode" column="plan_code"/>
+        <result property="planName" column="plan_name"/>
+        <result property="description" column="description"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
+    <resultMap id="roomResource" type="com.afterschool.platform.academic.RoomResource">
+        <id property="id" column="id"/>
+        <result property="schoolId" column="school_id"/>
+        <result property="roomCode" column="room_code"/>
+        <result property="roomName" column="room_name"/>
+        <result property="capacity" column="capacity"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
+    <resultMap id="sessionResource" type="com.afterschool.platform.academic.SessionResource">
+        <id property="id" column="id"/>
+        <result property="schoolId" column="school_id"/>
+        <result property="offeringId" column="offering_id"/>
+        <result property="teacherId" column="teacher_id"/>
+        <result property="termId" column="term_id"/>
+        <result property="termStartDate" column="term_start_date"/>
+        <result property="termEndDate" column="term_end_date"/>
+        <result property="offeringStartDate" column="offering_start_date"/>
+        <result property="offeringEndDate" column="offering_end_date"/>
+        <result property="offeringCapacity" column="offering_capacity"/>
+        <result property="sessionDate" column="session_date"/>
+        <result property="startTime" column="start_time"/>
+        <result property="endTime" column="end_time"/>
+        <result property="roomId" column="room_id"/>
+        <result property="classroom" column="classroom"/>
+        <result property="status" column="status"/>
+        <result property="offeringStatus" column="offering_status"/>
+    </resultMap>
+
+    <sql id="termColumns">
+        t.id,
+        t.term_code AS termCode,
+        t.term_name AS termName,
+        t.start_date AS startDate,
+        t.end_date AS endDate,
+        t.status,
+        u.display_name AS createdByName,
+        t.created_at AS createdAt,
+        t.updated_at AS updatedAt
+    </sql>
+
+    <select id="listTerms" resultType="map">
+        SELECT <include refid="termColumns"/>
+        FROM academic_term t
+        JOIN sys_user u ON u.id = t.created_by
+        ORDER BY t.start_date DESC, t.id DESC
+    </select>
+
+    <select id="findTermByCode" resultType="map">
+        SELECT <include refid="termColumns"/>
+        FROM academic_term t
+        JOIN sys_user u ON u.id = t.created_by
+        WHERE t.term_code = #{termCode}
+    </select>
+
+    <select id="findTerm" resultMap="academicTerm">
+        SELECT id, term_code, term_name, start_date, end_date, status
+        FROM academic_term
+        WHERE id = #{id}
+    </select>
+
+    <select id="lockTerm" resultMap="academicTerm">
+        SELECT id, term_code, term_name, start_date, end_date, status
+        FROM academic_term
+        WHERE id = #{id}
+        FOR UPDATE
+    </select>
+
+    <insert id="insertTerm">
+        INSERT INTO academic_term (
+            term_code, term_name, start_date, end_date, status, created_by
+        ) VALUES (
+            #{termCode}, #{termName}, #{startDate}, #{endDate}, #{status}, #{createdBy}
+        )
+    </insert>
+
+    <update id="updateTerm">
+        UPDATE academic_term
+        SET term_code = #{termCode},
+            term_name = #{termName},
+            start_date = #{startDate},
+            end_date = #{endDate},
+            status = #{status}
+        WHERE id = #{id}
+    </update>
+
+    <select id="countTermPlans" resultType="int">
+        SELECT COUNT(*)
+        FROM school_service_plan
+        WHERE term_id = #{termId}
+    </select>
+
+    <sql id="servicePlanColumns">
+        p.id,
+        p.school_id AS schoolId,
+        s.school_name AS schoolName,
+        p.term_id AS termId,
+        t.term_code AS termCode,
+        t.term_name AS termName,
+        p.plan_code AS planCode,
+        p.plan_name AS planName,
+        p.description,
+        p.status,
+        p.return_reason AS returnReason,
+        p.submitted_at AS submittedAt,
+        p.filed_at AS filedAt,
+        p.activated_at AS activatedAt,
+        p.closed_at AS closedAt,
+        p.archived_at AS archivedAt,
+        creator.display_name AS createdByName,
+        reviewer.display_name AS reviewedByName,
+        p.version,
+        p.created_at AS createdAt,
+        p.updated_at AS updatedAt
+    </sql>
+
+    <select id="listServicePlans" resultType="map">
+        SELECT <include refid="servicePlanColumns"/>
+        FROM school_service_plan p
+        JOIN school s ON s.id = p.school_id
+        JOIN academic_term t ON t.id = p.term_id
+        JOIN sys_user creator ON creator.id = p.created_by
+        LEFT JOIN sys_user reviewer ON reviewer.id = p.reviewed_by
+        <where>
+            <if test="schoolId != null">p.school_id = #{schoolId}</if>
+            <if test="termId != null">AND p.term_id = #{termId}</if>
+        </where>
+        ORDER BY t.start_date DESC, s.school_name, p.plan_code, p.id
+    </select>
+
+    <select id="findServicePlanByCode" resultType="map">
+        SELECT <include refid="servicePlanColumns"/>
+        FROM school_service_plan p
+        JOIN school s ON s.id = p.school_id
+        JOIN academic_term t ON t.id = p.term_id
+        JOIN sys_user creator ON creator.id = p.created_by
+        LEFT JOIN sys_user reviewer ON reviewer.id = p.reviewed_by
+        WHERE p.school_id = #{schoolId}
+          AND p.plan_code = #{planCode}
+    </select>
+
+    <select id="findServicePlan" resultMap="servicePlan">
+        SELECT id, school_id, term_id, plan_code, plan_name, description, status
+        FROM school_service_plan
+        WHERE id = #{id}
+    </select>
+
+    <select id="lockServicePlan" resultMap="servicePlan">
+        SELECT id, school_id, term_id, plan_code, plan_name, description, status
+        FROM school_service_plan
+        WHERE id = #{id}
+          AND school_id = #{schoolId}
+        FOR UPDATE
+    </select>
+
+    <insert id="insertServicePlan">
+        INSERT INTO school_service_plan (
+            school_id, term_id, plan_code, plan_name, description, created_by
+        ) VALUES (
+            #{schoolId}, #{termId}, #{planCode}, #{planName}, #{description}, #{createdBy}
+        )
+    </insert>
+
+    <update id="updateServicePlan">
+        UPDATE school_service_plan
+        SET term_id = #{termId},
+            plan_code = #{planCode},
+            plan_name = #{planName},
+            description = #{description},
+            version = version + 1
+        WHERE id = #{id}
+          AND school_id = #{schoolId}
+    </update>
+
+    <update id="transitionServicePlan">
+        UPDATE school_service_plan
+        SET status = #{targetStatus},
+            version = version + 1
+            <choose>
+                <when test="targetStatus == 'SUBMITTED'">
+                    , submitted_at = #{transitionTime}
+                    , return_reason = NULL
+                </when>
+                <when test="targetStatus == 'FILED'">
+                    , filed_at = #{transitionTime}
+                    , reviewed_by = #{actorId}
+                    , return_reason = NULL
+                </when>
+                <when test="targetStatus == 'RETURNED'">
+                    , return_reason = #{reason}
+                    , reviewed_by = #{actorId}
+                </when>
+                <when test="targetStatus == 'ACTIVE'">
+                    , activated_at = #{transitionTime}
+                    , reviewed_by = #{actorId}
+                </when>
+                <when test="targetStatus == 'CLOSED'">
+                    , closed_at = #{transitionTime}
+                    , reviewed_by = #{actorId}
+                </when>
+                <when test="targetStatus == 'ARCHIVED'">
+                    , archived_at = #{transitionTime}
+                    , reviewed_by = #{actorId}
+                </when>
+            </choose>
+        WHERE id = #{id}
+          AND school_id = #{schoolId}
+          AND status = #{expectedStatus}
+    </update>
+
+    <select id="countOtherActivePlans" resultType="int">
+        SELECT COUNT(*)
+        FROM school_service_plan
+        WHERE school_id = #{schoolId}
+          AND term_id = #{termId}
+          AND id != #{excludeId}
+          AND status = 'ACTIVE'
+    </select>
+
+    <select id="countPlanOfferingDependencies" resultType="int">
+        SELECT COUNT(*)
+        FROM course_offering
+        WHERE plan_id = #{planId}
+    </select>
+
+    <sql id="roomColumns">
+        r.id,
+        r.school_id AS schoolId,
+        s.school_name AS schoolName,
+        r.room_code AS roomCode,
+        r.room_name AS roomName,
+        r.location,
+        r.capacity,
+        r.status,
+        u.display_name AS createdByName,
+        r.created_at AS createdAt,
+        r.updated_at AS updatedAt
+    </sql>
+
+    <select id="listRooms" resultType="map">
+        SELECT <include refid="roomColumns"/>
+        FROM school_room r
+        JOIN school s ON s.id = r.school_id
+        JOIN sys_user u ON u.id = r.created_by
+        <if test="schoolId != null">WHERE r.school_id = #{schoolId}</if>
+        ORDER BY s.school_name, r.room_code, r.id
+    </select>
+
+    <select id="findRoomByCode" resultType="map">
+        SELECT <include refid="roomColumns"/>
+        FROM school_room r
+        JOIN school s ON s.id = r.school_id
+        JOIN sys_user u ON u.id = r.created_by
+        WHERE r.school_id = #{schoolId}
+          AND r.room_code = #{roomCode}
+    </select>
+
+    <select id="lockRoom" resultMap="roomResource">
+        SELECT id, school_id, room_code, room_name, capacity, status
+        FROM school_room
+        WHERE id = #{id}
+          AND school_id = #{schoolId}
+        FOR UPDATE
+    </select>
+
+    <insert id="insertRoom">
+        INSERT INTO school_room (
+            school_id, room_code, room_name, location,
+            capacity, status, created_by
+        ) VALUES (
+            #{schoolId}, #{roomCode}, #{roomName}, #{location},
+            #{capacity}, #{status}, #{createdBy}
+        )
+    </insert>
+
+    <update id="updateRoom">
+        UPDATE school_room
+        SET room_code = #{roomCode},
+            room_name = #{roomName},
+            location = #{location},
+            capacity = #{capacity},
+            status = #{status}
+        WHERE id = #{id}
+          AND school_id = #{schoolId}
+    </update>
+
+    <select id="countOpenRoomOfferings" resultType="int">
+        SELECT COUNT(*)
+        FROM course_offering
+        WHERE room_id = #{roomId}
+          AND status NOT IN ('FINISHED', 'CANCELED')
+    </select>
+
+    <select id="countRoomCapacityViolations" resultType="int">
+        SELECT COUNT(*)
+        FROM course_offering
+        WHERE room_id = #{roomId}
+          AND status NOT IN ('FINISHED', 'CANCELED')
+          AND capacity &gt; #{capacity}
+    </select>
+
+    <sql id="calendarColumns">
+        e.id,
+        e.school_id AS schoolId,
+        s.school_name AS schoolName,
+        e.term_id AS termId,
+        t.term_code AS termCode,
+        t.term_name AS termName,
+        e.event_date AS eventDate,
+        e.day_type AS dayType,
+        e.event_name AS eventName,
+        e.description,
+        u.display_name AS createdByName,
+        e.created_at AS createdAt,
+        e.updated_at AS updatedAt
+    </sql>
+
+    <select id="listCalendarEvents" resultType="map">
+        SELECT <include refid="calendarColumns"/>
+        FROM school_calendar_event e
+        JOIN school s ON s.id = e.school_id
+        JOIN academic_term t ON t.id = e.term_id
+        JOIN sys_user u ON u.id = e.created_by
+        <where>
+            <if test="schoolId != null">e.school_id = #{schoolId}</if>
+            <if test="termId != null">AND e.term_id = #{termId}</if>
+        </where>
+        ORDER BY e.event_date, e.id
+    </select>
+
+    <select id="findCalendarEvent" resultType="map">
+        SELECT <include refid="calendarColumns"/>
+        FROM school_calendar_event e
+        JOIN school s ON s.id = e.school_id
+        JOIN academic_term t ON t.id = e.term_id
+        JOIN sys_user u ON u.id = e.created_by
+        WHERE e.id = #{id}
+          AND e.school_id = #{schoolId}
+    </select>
+
+    <select id="findCalendarEventByDate" resultType="map">
+        SELECT <include refid="calendarColumns"/>
+        FROM school_calendar_event e
+        JOIN school s ON s.id = e.school_id
+        JOIN academic_term t ON t.id = e.term_id
+        JOIN sys_user u ON u.id = e.created_by
+        WHERE e.school_id = #{schoolId}
+          AND e.event_date = #{eventDate}
+    </select>
+
+    <select id="lockCalendarEvent" resultType="long">
+        SELECT id
+        FROM school_calendar_event
+        WHERE id = #{id}
+          AND school_id = #{schoolId}
+        FOR UPDATE
+    </select>
+
+    <insert id="insertCalendarEvent">
+        INSERT INTO school_calendar_event (
+            school_id, term_id, event_date, day_type,
+            event_name, description, created_by
+        ) VALUES (
+            #{schoolId}, #{termId}, #{eventDate}, #{dayType},
+            #{eventName}, #{description}, #{createdBy}
+        )
+    </insert>
+
+    <update id="updateCalendarEvent">
+        UPDATE school_calendar_event
+        SET term_id = #{termId},
+            event_date = #{eventDate},
+            day_type = #{dayType},
+            event_name = #{eventName},
+            description = #{description}
+        WHERE id = #{id}
+          AND school_id = #{schoolId}
+    </update>
+
+    <select id="lockCalendarOfferings" resultType="long">
+        SELECT id
+        FROM course_offering
+        WHERE school_id = #{schoolId}
+        ORDER BY id
+        FOR UPDATE
+    </select>
+
+    <resultMap id="calendarSession" type="com.afterschool.platform.academic.SessionResource">
+        <id property="id" column="id"/>
+        <result property="schoolId" column="school_id"/>
+        <result property="offeringId" column="offering_id"/>
+        <result property="sessionDate" column="session_date"/>
+        <result property="startTime" column="start_time"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
+    <select id="lockCalendarSessions" resultMap="calendarSession">
+        SELECT id, school_id, offering_id, session_date, start_time, status
+        FROM lesson_session
+        WHERE school_id = #{schoolId}
+          AND session_date = #{eventDate}
+        ORDER BY offering_id, id
+        FOR UPDATE
+    </select>
+
+    <select id="countCalendarSessionHistory" resultType="int">
+        SELECT CASE WHEN
+            EXISTS (
+                SELECT 1
+                FROM attendance
+                WHERE school_id = #{schoolId}
+                  AND session_id = #{sessionId}
+            )
+            OR EXISTS (
+                SELECT 1
+                FROM schedule_adjustment
+                WHERE school_id = #{schoolId}
+                  AND session_id = #{sessionId}
+            )
+            OR EXISTS (
+                SELECT 1
+                FROM leave_request
+                WHERE school_id = #{schoolId}
+                  AND session_id = #{sessionId}
+            )
+            OR EXISTS (
+                SELECT 1
+                FROM supervision_alert
+                WHERE school_id = #{schoolId}
+                  AND session_id = #{sessionId}
+            )
+        THEN 1 ELSE 0 END
+    </select>
+
+    <update id="cancelCalendarSession">
+        UPDATE lesson_session
+        SET status = 'CANCELED'
+        WHERE id = #{sessionId}
+          AND school_id = #{schoolId}
+          AND status = 'SCHEDULED'
+          AND TIMESTAMP(session_date, start_time) &gt; #{now}
+    </update>
+
+    <select id="countClosedCalendarDay" resultType="int">
+        SELECT COUNT(*)
+        FROM school_calendar_event
+        WHERE school_id = #{schoolId}
+          AND event_date = #{sessionDate}
+          AND day_type IN ('HOLIDAY', 'SUSPENDED')
+    </select>
+
+    <sql id="adjustmentColumns">
+        a.id,
+        a.school_id AS schoolId,
+        s.school_name AS schoolName,
+        a.session_id AS sessionId,
+        ls.offering_id AS offeringId,
+        o.offering_code AS offeringCode,
+        c.course_name AS courseName,
+        o.teacher_id AS teacherId,
+        teacher.full_name AS teacherName,
+        a.original_session_date AS originalSessionDate,
+        a.original_start_time AS originalStartTime,
+        a.original_end_time AS originalEndTime,
+        a.original_room_id AS originalRoomId,
+        a.original_classroom AS originalClassroom,
+        a.adjusted_session_date AS adjustedSessionDate,
+        a.adjusted_start_time AS adjustedStartTime,
+        a.adjusted_end_time AS adjustedEndTime,
+        a.adjusted_room_id AS adjustedRoomId,
+        adjusted_room.room_code AS adjustedRoomCode,
+        a.adjusted_classroom AS adjustedClassroom,
+        a.reason,
+        a.status,
+        requester.display_name AS requestedByName,
+        a.applied_at AS appliedAt,
+        a.created_at AS createdAt
+    </sql>
+
+    <select id="listScheduleAdjustments" resultType="map">
+        SELECT <include refid="adjustmentColumns"/>
+        FROM schedule_adjustment a
+        JOIN school s ON s.id = a.school_id
+        JOIN lesson_session ls ON ls.id = a.session_id
+        JOIN course_offering o ON o.id = ls.offering_id
+        JOIN course c ON c.id = o.course_id
+        JOIN teacher ON teacher.id = o.teacher_id
+        JOIN school_room adjusted_room ON adjusted_room.id = a.adjusted_room_id
+        JOIN sys_user requester ON requester.id = a.requested_by
+        <where>
+            <if test="schoolId != null">a.school_id = #{schoolId}</if>
+            <if test="offeringId != null">AND ls.offering_id = #{offeringId}</if>
+            <if test="teacherId != null">AND o.teacher_id = #{teacherId}</if>
+        </where>
+        ORDER BY a.applied_at DESC, a.id DESC
+    </select>
+
+    <sql id="sessionResourceColumns">
+        ls.id,
+        ls.school_id,
+        ls.offering_id,
+        o.teacher_id,
+        o.term_id,
+        term.start_date AS term_start_date,
+        term.end_date AS term_end_date,
+        o.start_date AS offering_start_date,
+        o.end_date AS offering_end_date,
+        o.capacity AS offering_capacity,
+        ls.session_date,
+        ls.start_time,
+        ls.end_time,
+        COALESCE(ls.room_id, o.room_id) AS room_id,
+        ls.classroom,
+        ls.status,
+        o.status AS offering_status
+    </sql>
+
+    <select id="findSessionResource" resultMap="sessionResource">
+        SELECT <include refid="sessionResourceColumns"/>
+        FROM lesson_session ls
+        JOIN course_offering o ON o.id = ls.offering_id
+        LEFT JOIN academic_term term ON term.id = o.term_id
+        WHERE ls.id = #{sessionId}
+    </select>
+
+    <select id="lockSessionResource" resultMap="sessionResource">
+        SELECT <include refid="sessionResourceColumns"/>
+        FROM lesson_session ls
+        JOIN course_offering o ON o.id = ls.offering_id
+        LEFT JOIN academic_term term ON term.id = o.term_id
+        WHERE ls.id = #{sessionId}
+        FOR UPDATE
+    </select>
+
+    <select id="lockTeacher" resultType="long">
+        SELECT id
+        FROM teacher
+        WHERE id = #{teacherId}
+          AND school_id = #{schoolId}
+        FOR UPDATE
+    </select>
+
+    <select id="lockOffering" resultType="long">
+        SELECT id
+        FROM course_offering
+        WHERE id = #{offeringId}
+          AND school_id = #{schoolId}
+        FOR UPDATE
+    </select>
+
+    <select id="countSessionAttendance" resultType="int">
+        SELECT COUNT(*)
+        FROM attendance
+        WHERE session_id = #{sessionId}
+    </select>
+
+    <select id="findTeacherSessionConflict" resultType="long">
+        SELECT conflicts.id
+        FROM (
+            SELECT ls.id
+            FROM lesson_session ls
+            JOIN course_offering o ON o.id = ls.offering_id
+            WHERE o.teacher_id = #{teacherId}
+              AND ls.id != #{excludeSessionId}
+              AND ls.session_date = #{sessionDate}
+              AND ls.start_time &lt; #{endTime}
+              AND ls.end_time &gt; #{startTime}
+              AND ls.status != 'CANCELED'
+              AND o.status NOT IN ('CANCELED', 'FINISHED')
+            UNION ALL
+            SELECT o.id
+            FROM course_offering o
+            WHERE o.teacher_id = #{teacherId}
+              AND o.id != (
+                  SELECT current_session.offering_id
+                  FROM lesson_session current_session
+                  WHERE current_session.id = #{excludeSessionId}
+              )
+              AND o.week_day = WEEKDAY(#{sessionDate}) + 1
+              AND o.start_date &lt;= #{sessionDate}
+              AND o.end_date &gt;= #{sessionDate}
+              AND o.start_time &lt; #{endTime}
+              AND o.end_time &gt; #{startTime}
+              AND o.status NOT IN ('CANCELED', 'FINISHED')
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM lesson_session generated_session
+                  WHERE generated_session.offering_id = o.id
+                    AND generated_session.session_date = #{sessionDate}
+              )
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM schedule_adjustment moved_adjustment
+                  JOIN lesson_session moved_session
+                    ON moved_session.id = moved_adjustment.session_id
+                  WHERE moved_session.offering_id = o.id
+                    AND moved_adjustment.original_session_date = #{sessionDate}
+                    AND moved_adjustment.status = 'APPLIED'
+              )
+        ) conflicts
+        ORDER BY conflicts.id
+        LIMIT 1
+    </select>
+
+    <select id="findRoomSessionConflict" resultType="long">
+        SELECT conflicts.id
+        FROM (
+            SELECT ls.id
+            FROM lesson_session ls
+            JOIN course_offering o ON o.id = ls.offering_id
+            WHERE ls.school_id = #{schoolId}
+              AND COALESCE(ls.room_id, o.room_id) = #{roomId}
+              AND ls.id != #{excludeSessionId}
+              AND ls.session_date = #{sessionDate}
+              AND ls.start_time &lt; #{endTime}
+              AND ls.end_time &gt; #{startTime}
+              AND ls.status != 'CANCELED'
+              AND o.status NOT IN ('CANCELED', 'FINISHED')
+            UNION ALL
+            SELECT o.id
+            FROM course_offering o
+            WHERE o.school_id = #{schoolId}
+              AND o.room_id = #{roomId}
+              AND o.id != (
+                  SELECT current_session.offering_id
+                  FROM lesson_session current_session
+                  WHERE current_session.id = #{excludeSessionId}
+              )
+              AND o.week_day = WEEKDAY(#{sessionDate}) + 1
+              AND o.start_date &lt;= #{sessionDate}
+              AND o.end_date &gt;= #{sessionDate}
+              AND o.start_time &lt; #{endTime}
+              AND o.end_time &gt; #{startTime}
+              AND o.status NOT IN ('CANCELED', 'FINISHED')
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM lesson_session generated_session
+                  WHERE generated_session.offering_id = o.id
+                    AND generated_session.session_date = #{sessionDate}
+              )
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM schedule_adjustment moved_adjustment
+                  JOIN lesson_session moved_session
+                    ON moved_session.id = moved_adjustment.session_id
+                  WHERE moved_session.offering_id = o.id
+                    AND moved_adjustment.original_session_date = #{sessionDate}
+                    AND moved_adjustment.status = 'APPLIED'
+              )
+        ) conflicts
+        ORDER BY conflicts.id
+        LIMIT 1
+    </select>
+
+    <insert id="insertScheduleAdjustment">
+        INSERT INTO schedule_adjustment (
+            school_id, session_id,
+            original_session_date, original_start_time, original_end_time,
+            original_room_id, original_classroom,
+            adjusted_session_date, adjusted_start_time, adjusted_end_time,
+            adjusted_room_id, adjusted_classroom,
+            reason, requested_by, applied_at
+        ) VALUES (
+            #{schoolId}, #{sessionId},
+            #{originalSessionDate}, #{originalStartTime}, #{originalEndTime},
+            #{originalRoomId}, #{originalClassroom},
+            #{adjustedSessionDate}, #{adjustedStartTime}, #{adjustedEndTime},
+            #{adjustedRoomId}, #{adjustedClassroom},
+            #{reason}, #{requestedBy}, #{appliedAt}
+        )
+    </insert>
+
+    <update id="updateSessionSchedule">
+        UPDATE lesson_session
+        SET session_date = #{sessionDate},
+            start_time = #{startTime},
+            end_time = #{endTime},
+            room_id = #{roomId},
+            classroom = #{classroom}
+        WHERE id = #{sessionId}
+          AND school_id = #{schoolId}
+          AND status = 'SCHEDULED'
+    </update>
+
+    <select id="findLatestScheduleAdjustment" resultType="map">
+        SELECT <include refid="adjustmentColumns"/>
+        FROM schedule_adjustment a
+        JOIN school s ON s.id = a.school_id
+        JOIN lesson_session ls ON ls.id = a.session_id
+        JOIN course_offering o ON o.id = ls.offering_id
+        JOIN course c ON c.id = o.course_id
+        JOIN teacher ON teacher.id = o.teacher_id
+        JOIN school_room adjusted_room ON adjusted_room.id = a.adjusted_room_id
+        JOIN sys_user requester ON requester.id = a.requested_by
+        WHERE a.session_id = #{sessionId}
+          AND a.requested_by = #{requestedBy}
+        ORDER BY a.id DESC
+        LIMIT 1
+    </select>
+
+    <select id="findRoomOfferingConflict" resultType="long">
+        SELECT id
+        FROM course_offering
+        WHERE school_id = #{schoolId}
+          AND room_id = #{roomId}
+          <if test="excludeOfferingId != null">AND id != #{excludeOfferingId}</if>
+          AND week_day = #{weekDay}
+          AND start_date &lt;= #{endDate}
+          AND end_date &gt;= #{startDate}
+          AND start_time &lt; #{endTime}
+          AND end_time &gt; #{startTime}
+          AND status NOT IN ('CANCELED', 'FINISHED')
+        ORDER BY id
+        LIMIT 1
+        FOR UPDATE
+    </select>
+</mapper>

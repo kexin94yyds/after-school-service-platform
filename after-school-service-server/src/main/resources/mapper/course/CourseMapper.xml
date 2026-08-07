@@ -1,0 +1,308 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.afterschool.platform.course.CourseMapper">
+    <sql id="courseColumns">
+        c.id,
+        c.school_id AS schoolId,
+        s.school_name AS schoolName,
+        c.course_code AS courseCode,
+        c.course_name AS courseName,
+        c.category,
+        c.description,
+        c.target_grade_min AS targetGradeMin,
+        c.target_grade_max AS targetGradeMax,
+        c.default_capacity AS defaultCapacity,
+        c.status,
+        c.created_at AS createdAt,
+        c.updated_at AS updatedAt
+    </sql>
+
+    <select id="listCourses" resultType="map">
+        SELECT <include refid="courseColumns"/>
+        FROM course c
+        JOIN school s ON s.id = c.school_id
+        <if test="schoolId != null">WHERE c.school_id = #{schoolId}</if>
+        ORDER BY c.category, c.course_name, c.id
+    </select>
+
+    <select id="findCourseByCode" resultType="map">
+        SELECT <include refid="courseColumns"/>
+        FROM course c
+        JOIN school s ON s.id = c.school_id
+        WHERE c.school_id = #{schoolId}
+          AND c.course_code = #{courseCode}
+    </select>
+
+    <insert id="insertCourse">
+        INSERT INTO course (
+            school_id, course_code, course_name, category, description,
+            target_grade_min, target_grade_max, default_capacity, status, created_by
+        ) VALUES (
+            #{schoolId}, #{courseCode}, #{courseName}, #{category}, #{description},
+            #{targetGradeMin}, #{targetGradeMax}, #{defaultCapacity}, #{status}, #{createdBy}
+        )
+    </insert>
+
+    <update id="updateCourse">
+        UPDATE course
+        SET course_code = #{courseCode},
+            course_name = #{courseName},
+            category = #{category},
+            description = #{description},
+            target_grade_min = #{targetGradeMin},
+            target_grade_max = #{targetGradeMax},
+            default_capacity = #{defaultCapacity},
+            status = #{status}
+        WHERE id = #{id}
+          AND school_id = #{schoolId}
+    </update>
+
+    <select id="lockCourse" resultType="long">
+        SELECT id
+        FROM course
+        WHERE id = #{id}
+          AND school_id = #{schoolId}
+        FOR UPDATE
+    </select>
+
+    <select id="lockActiveCourse" resultType="long">
+        SELECT id
+        FROM course
+        WHERE id = #{id}
+          AND school_id = #{schoolId}
+          AND status = 'ACTIVE'
+        FOR UPDATE
+    </select>
+
+    <select id="countCourseDependencies" resultType="int">
+        SELECT COUNT(*)
+        FROM course_offering
+        WHERE course_id = #{id}
+    </select>
+
+    <select id="countCourseRuleDifferences" resultType="int">
+        SELECT COUNT(*)
+        FROM course
+        WHERE id = #{id}
+          AND school_id = #{schoolId}
+          AND NOT (
+              course_code = #{courseCode}
+              AND target_grade_min = #{targetGradeMin}
+              AND target_grade_max = #{targetGradeMax}
+          )
+    </select>
+
+    <select id="teacherExists" resultType="int">
+        SELECT COUNT(*)
+        FROM teacher
+        WHERE id = #{id}
+          AND school_id = #{schoolId}
+          AND status = 'ACTIVE'
+    </select>
+
+    <select id="lockTeacher" resultType="long">
+        SELECT id
+        FROM teacher
+        WHERE id = #{id}
+          AND school_id = #{schoolId}
+          AND status = 'ACTIVE'
+        FOR UPDATE
+    </select>
+
+    <select id="offeringStatus" resultType="string">
+        SELECT status
+        FROM course_offering
+        WHERE id = #{id}
+          AND school_id = #{schoolId}
+        FOR UPDATE
+    </select>
+
+    <select id="countScheduledSessions" resultType="int">
+        SELECT COUNT(*)
+        FROM lesson_session
+        WHERE offering_id = #{id}
+          AND status = 'SCHEDULED'
+    </select>
+
+    <select id="countStartedScheduledSessions" resultType="int">
+        SELECT COUNT(*)
+        FROM lesson_session
+        WHERE offering_id = #{id}
+          AND status = 'SCHEDULED'
+          AND TIMESTAMP(session_date, start_time) &lt;= #{now}
+    </select>
+
+    <select id="countOfferingDependencies" resultType="int">
+        SELECT
+            (SELECT COUNT(*) FROM enrollment WHERE offering_id = #{id})
+            +
+            (SELECT COUNT(*) FROM lesson_session WHERE offering_id = #{id})
+    </select>
+
+    <select id="countOfferingShapeDifferences" resultType="int">
+        SELECT COUNT(*)
+        FROM course_offering
+        WHERE id = #{id}
+          AND school_id = #{schoolId}
+          AND NOT (
+              course_id = #{courseId}
+              AND teacher_id = #{teacherId}
+              AND offering_code = #{offeringCode}
+              AND term = #{term}
+              AND week_day = #{weekDay}
+              AND start_time = #{startTime}
+              AND end_time = #{endTime}
+              AND start_date = #{startDate}
+              AND end_date = #{endDate}
+              AND enrollment_start = #{enrollmentStart}
+              AND enrollment_end = #{enrollmentEnd}
+              AND classroom = #{classroom}
+              AND term_id &lt;=> #{termId}
+              AND plan_id &lt;=> #{planId}
+              AND room_id &lt;=> #{roomId}
+          )
+    </select>
+
+    <select id="findTeacherConflict" resultType="long">
+        SELECT id
+        FROM course_offering
+        WHERE teacher_id = #{teacherId}
+          <if test="excludeOfferingId != null">AND id != #{excludeOfferingId}</if>
+          AND week_day = #{weekDay}
+          AND start_date &lt;= #{endDate}
+          AND end_date &gt;= #{startDate}
+          AND start_time &lt; #{endTime}
+          AND end_time &gt; #{startTime}
+          AND status NOT IN ('CANCELED', 'FINISHED')
+        ORDER BY id
+        LIMIT 1
+        FOR UPDATE
+    </select>
+
+    <sql id="offeringColumns">
+        o.id,
+        o.school_id AS schoolId,
+        s.school_name AS schoolName,
+        o.course_id AS courseId,
+        c.course_code AS courseCode,
+        c.course_name AS courseName,
+        c.category,
+        c.target_grade_min AS targetGradeMin,
+        c.target_grade_max AS targetGradeMax,
+        o.teacher_id AS teacherId,
+        t.full_name AS teacherName,
+        o.offering_code AS offeringCode,
+        o.term,
+        o.term_id AS termId,
+        trm.term_code AS termCode,
+        trm.term_name AS termName,
+        o.plan_id AS planId,
+        plan.plan_code AS planCode,
+        plan.plan_name AS planName,
+        o.week_day AS weekDay,
+        o.start_time AS startTime,
+        o.end_time AS endTime,
+        o.start_date AS startDate,
+        o.end_date AS endDate,
+        o.enrollment_start AS enrollmentStart,
+        o.enrollment_end AS enrollmentEnd,
+        o.capacity,
+        o.enrolled_count AS enrolledCount,
+        o.classroom,
+        o.room_id AS roomId,
+        room.room_code AS roomCode,
+        room.room_name AS roomName,
+        o.status,
+        o.version
+    </sql>
+
+    <select id="listOfferings" resultType="map">
+        SELECT <include refid="offeringColumns"/>
+        FROM course_offering o
+        JOIN school s ON s.id = o.school_id
+        JOIN course c ON c.id = o.course_id
+        JOIN teacher t ON t.id = o.teacher_id
+        LEFT JOIN academic_term trm ON trm.id = o.term_id
+        LEFT JOIN school_service_plan plan ON plan.id = o.plan_id
+        LEFT JOIN school_room room ON room.id = o.room_id
+        <where>
+            <if test="schoolId != null">o.school_id = #{schoolId}</if>
+            <if test="teacherId != null">AND o.teacher_id = #{teacherId}</if>
+        </where>
+        ORDER BY o.start_date DESC, o.week_day, o.start_time, o.id
+    </select>
+
+    <select id="findOfferingByCode" resultType="map">
+        SELECT <include refid="offeringColumns"/>
+        FROM course_offering o
+        JOIN school s ON s.id = o.school_id
+        JOIN course c ON c.id = o.course_id
+        JOIN teacher t ON t.id = o.teacher_id
+        LEFT JOIN academic_term trm ON trm.id = o.term_id
+        LEFT JOIN school_service_plan plan ON plan.id = o.plan_id
+        LEFT JOIN school_room room ON room.id = o.room_id
+        WHERE o.school_id = #{schoolId}
+          AND o.offering_code = #{offeringCode}
+    </select>
+
+    <insert id="insertOffering">
+        INSERT INTO course_offering (
+            school_id, course_id, teacher_id, offering_code, term, term_id, plan_id,
+            week_day, start_time, end_time, start_date, end_date,
+            enrollment_start, enrollment_end, capacity, classroom, room_id, status
+        ) VALUES (
+            #{schoolId}, #{courseId}, #{teacherId}, #{offeringCode}, #{term},
+            #{termId}, #{planId},
+            #{weekDay}, #{startTime}, #{endTime}, #{startDate}, #{endDate},
+            #{enrollmentStart}, #{enrollmentEnd}, #{capacity}, #{classroom},
+            #{roomId}, #{status}
+        )
+    </insert>
+
+    <update id="updateOffering">
+        UPDATE course_offering
+        SET course_id = #{courseId},
+            teacher_id = #{teacherId},
+            offering_code = #{offeringCode},
+            term = #{term},
+            term_id = #{termId},
+            plan_id = #{planId},
+            week_day = #{weekDay},
+            start_time = #{startTime},
+            end_time = #{endTime},
+            start_date = #{startDate},
+            end_date = #{endDate},
+            enrollment_start = #{enrollmentStart},
+            enrollment_end = #{enrollmentEnd},
+            capacity = #{capacity},
+            <if test="status == 'CANCELED'">
+                enrolled_count = 0,
+            </if>
+            classroom = #{classroom},
+            room_id = #{roomId},
+            status = #{status},
+            version = version + 1
+        WHERE id = #{id}
+          AND school_id = #{schoolId}
+          AND (#{status} = 'CANCELED' OR enrolled_count &lt;= #{capacity})
+    </update>
+
+    <update id="cancelActiveEnrollments">
+        UPDATE enrollment
+        SET status = 'CANCELED',
+            canceled_at = CURRENT_TIMESTAMP(3),
+            canceled_by = #{canceledBy}
+        WHERE offering_id = #{id}
+          AND status = 'ENROLLED'
+    </update>
+
+    <update id="cancelScheduledSessions">
+        UPDATE lesson_session
+        SET status = 'CANCELED'
+        WHERE offering_id = #{id}
+          AND status = 'SCHEDULED'
+          AND TIMESTAMP(session_date, start_time) &gt; #{now}
+    </update>
+</mapper>

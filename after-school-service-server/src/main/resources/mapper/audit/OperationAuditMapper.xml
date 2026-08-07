@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.afterschool.platform.audit.OperationAuditMapper">
+    <insert id="insert">
+        INSERT INTO operation_audit (
+            actor_user_id,
+            actor_role,
+            actor_school_id,
+            target_school_id,
+            http_method,
+            request_path,
+            response_status,
+            source_fingerprint
+        ) VALUES (
+            #{actorUserId},
+            #{actorRole},
+            #{actorSchoolId},
+            #{targetSchoolId},
+            #{httpMethod},
+            #{requestPath},
+            #{responseStatus},
+            #{sourceFingerprint}
+        )
+    </insert>
+
+    <select id="list" resultType="map">
+        SELECT oa.id,
+               oa.actor_user_id AS actorUserId,
+               u.username AS actorUsername,
+               u.display_name AS actorName,
+               oa.actor_role AS actorRole,
+               oa.actor_school_id AS actorSchoolId,
+               actor_school.school_name AS actorSchoolName,
+               oa.target_school_id AS targetSchoolId,
+               oa.target_school_id AS schoolId,
+               target_school.school_name AS targetSchoolName,
+               target_school.school_name AS schoolName,
+               oa.http_method AS httpMethod,
+               oa.request_path AS requestPath,
+               oa.response_status AS responseStatus,
+               oa.source_fingerprint AS sourceFingerprint,
+               oa.occurred_at AS occurredAt
+        FROM operation_audit oa
+        JOIN sys_user u ON u.id = oa.actor_user_id
+        LEFT JOIN school actor_school
+          ON actor_school.id = oa.actor_school_id
+        LEFT JOIN school target_school
+          ON target_school.id = oa.target_school_id
+        <where>
+            <if test="schoolId != null">
+                oa.target_school_id = #{schoolId}
+            </if>
+            <if test="actorUserId != null">
+                AND oa.actor_user_id = #{actorUserId}
+            </if>
+            <if test="httpMethod != null">
+                AND oa.http_method = #{httpMethod}
+            </if>
+            <if test="pathPrefix != null">
+                AND oa.request_path LIKE CONCAT(#{pathPrefix}, '%')
+            </if>
+            <if test="occurredFrom != null">
+                AND oa.occurred_at >= #{occurredFrom}
+            </if>
+            <if test="occurredTo != null">
+                AND oa.occurred_at &lt;= #{occurredTo}
+            </if>
+        </where>
+        ORDER BY oa.occurred_at DESC, oa.id DESC
+        LIMIT 1000
+    </select>
+</mapper>

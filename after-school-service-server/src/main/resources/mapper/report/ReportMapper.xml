@@ -1,0 +1,251 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.afterschool.platform.report.ReportMapper">
+    <select id="overview" resultType="map">
+        SELECT
+            (SELECT COUNT(*) FROM school s
+             WHERE (#{schoolId} IS NULL OR s.id = #{schoolId})
+               AND s.status = 'ACTIVE') AS schoolCount,
+            (SELECT COUNT(*) FROM student st
+             WHERE (#{schoolId} IS NULL OR st.school_id = #{schoolId})
+               AND st.status = 'ACTIVE') AS studentCount,
+            (SELECT COUNT(*) FROM teacher t
+             WHERE (#{schoolId} IS NULL OR t.school_id = #{schoolId})
+               AND t.status = 'ACTIVE') AS teacherCount,
+            (SELECT COUNT(*) FROM course c
+             WHERE (#{schoolId} IS NULL OR c.school_id = #{schoolId})
+               AND c.status = 'ACTIVE') AS courseCount,
+            (SELECT COUNT(*) FROM course_offering o
+             WHERE (#{schoolId} IS NULL OR o.school_id = #{schoolId})
+               AND o.status NOT IN ('CANCELED')) AS offeringCount,
+            (SELECT COUNT(*) FROM enrollment e
+             WHERE (#{schoolId} IS NULL OR e.school_id = #{schoolId})
+               AND e.status = 'ENROLLED') AS enrollmentCount,
+            (SELECT COUNT(*) FROM lesson_session ls
+             WHERE (#{schoolId} IS NULL OR ls.school_id = #{schoolId})) AS sessionCount,
+            COALESCE((
+                SELECT ROUND(
+                    100.0 * SUM(CASE WHEN a.status IN ('PRESENT', 'LATE') THEN 1 ELSE 0 END)
+                    / NULLIF(COUNT(*), 0),
+                    1
+                )
+                FROM attendance a
+                WHERE (#{schoolId} IS NULL OR a.school_id = #{schoolId})
+            ), 0) AS attendanceRate
+    </select>
+
+    <select id="schoolBreakdown" resultType="map">
+        SELECT s.id AS schoolId,
+               s.school_name AS schoolName,
+               (SELECT COUNT(*) FROM student st
+                WHERE st.school_id = s.id AND st.status = 'ACTIVE') AS studentCount,
+               (SELECT COUNT(*) FROM teacher t
+                WHERE t.school_id = s.id AND t.status = 'ACTIVE') AS teacherCount,
+               (SELECT COUNT(*) FROM course_offering o
+                WHERE o.school_id = s.id AND o.status != 'CANCELED') AS offeringCount,
+               (SELECT COUNT(*) FROM enrollment e
+                WHERE e.school_id = s.id AND e.status = 'ENROLLED') AS enrollmentCount,
+               (SELECT COALESCE(SUM(o.capacity), 0) FROM course_offering o
+                WHERE o.school_id = s.id AND o.status != 'CANCELED') AS capacity
+        FROM school s
+        WHERE (#{schoolId} IS NULL OR s.id = #{schoolId})
+        ORDER BY s.school_name
+    </select>
+
+    <select id="categoryBreakdown" resultType="map">
+        SELECT c.category,
+               COUNT(DISTINCT c.id) AS courseCount,
+               COUNT(DISTINCT o.id) AS offeringCount,
+               COUNT(DISTINCT CASE WHEN e.status = 'ENROLLED' THEN e.id END) AS enrollmentCount
+        FROM course c
+        LEFT JOIN course_offering o ON o.course_id = c.id AND o.status != 'CANCELED'
+        LEFT JOIN enrollment e ON e.offering_id = o.id
+        WHERE (#{schoolId} IS NULL OR c.school_id = #{schoolId})
+        GROUP BY c.category
+        ORDER BY enrollmentCount DESC, c.category
+    </select>
+
+    <select id="attendanceBreakdown" resultType="map">
+        SELECT a.status,
+               COUNT(*) AS count,
+               ROUND(
+                   100.0 * COUNT(*) / NULLIF(SUM(COUNT(*)) OVER (), 0),
+                   1
+               ) AS percentage
+        FROM attendance a
+        WHERE (#{schoolId} IS NULL OR a.school_id = #{schoolId})
+        GROUP BY a.status
+        ORDER BY FIELD(a.status, 'PRESENT', 'LATE', 'LEAVE', 'ABSENT')
+    </select>
+
+    <select id="teacherHours" resultType="map">
+        SELECT t.id AS teacherId,
+               t.teacher_no AS teacherNo,
+               t.full_name AS teacherName,
+               s.school_name AS schoolName,
+               COUNT(DISTINCT o.id) AS offeringCount,
+               COUNT(CASE WHEN ls.status = 'COMPLETED' THEN 1 END) AS completedSessions,
+               COALESCE(ROUND(SUM(
+                   CASE WHEN ls.status = 'COMPLETED'
+                        THEN TIME_TO_SEC(TIMEDIFF(ls.end_time, ls.start_time)) / 3600
+                        ELSE 0 END
+               ), 1), 0) AS completedHours
+        FROM teacher t
+        JOIN school s ON s.id = t.school_id
+        LEFT JOIN course_offering o ON o.teacher_id = t.id
+        LEFT JOIN lesson_session ls ON ls.offering_id = o.id
+        WHERE (#{schoolId} IS NULL OR t.school_id = #{schoolId})
+        GROUP BY t.id, t.teacher_no, t.full_name, s.school_name
+        ORDER BY completedHours DESC, t.full_name
+    </select>
+
+    <select id="satisfactionSummary" resultType="map">
+        SELECT COUNT(ce.id) AS evaluationCount,
+               COALESCE(ROUND(AVG(ce.rating), 2), 0) AS averageRating,
+               COALESCE(ROUND(
+                   100.0 * SUM(CASE WHEN ce.rating >= 4 THEN 1 ELSE 0 END)
+                   / NULLIF(COUNT(ce.id), 0),
+                   1
+               ), 0) AS satisfactionRate
+        FROM course_evaluation ce
+        WHERE (#{schoolId} IS NULL OR ce.school_id = #{schoolId})
+    </select>
+
+    <select id="coursePerformance" resultType="map">
+        SELECT o.school_id AS schoolId,
+               s.school_name AS schoolName,
+               o.term_id AS termId,
+               COALESCE(at.term_name, o.term) AS termName,
+               c.category,
+               c.id AS courseId,
+               c.course_name AS courseName,
+               o.id AS offeringId,
+               o.offering_code AS offeringCode,
+               t.id AS teacherId,
+               t.full_name AS teacherName,
+               o.status,
+               COALESCE(en.activeEnrollmentCount, 0)
+                   AS activeEnrollmentCount,
+               COALESCE(se.sessionCount, 0) AS sessionCount,
+               COALESCE(se.completedSessions, 0) AS completedSessions,
+               COALESCE(se.completedHours, 0) AS completedHours,
+               COALESCE(att.attendanceRate, 0) AS attendanceRate,
+               COALESCE(ev.evaluationCount, 0) AS evaluationCount,
+               COALESCE(ev.averageRating, 0) AS averageRating,
+               COALESCE(ev.satisfactionRate, 0) AS satisfactionRate
+        FROM course_offering o
+        JOIN school s ON s.id = o.school_id
+        JOIN course c ON c.id = o.course_id
+        JOIN teacher t ON t.id = o.teacher_id
+        LEFT JOIN academic_term at ON at.id = o.term_id
+        LEFT JOIN (
+            SELECT e.offering_id,
+                   COUNT(*) AS activeEnrollmentCount
+            FROM enrollment e
+            WHERE e.status = 'ENROLLED'
+            GROUP BY e.offering_id
+        ) en ON en.offering_id = o.id
+        LEFT JOIN (
+            SELECT ls.offering_id,
+                   COUNT(*) AS sessionCount,
+                   SUM(CASE WHEN ls.status = 'COMPLETED'
+                            THEN 1 ELSE 0 END) AS completedSessions,
+                   ROUND(SUM(
+                       CASE WHEN ls.status = 'COMPLETED'
+                            THEN TIME_TO_SEC(
+                                TIMEDIFF(ls.end_time, ls.start_time)
+                            ) / 3600
+                            ELSE 0 END
+                   ), 1) AS completedHours
+            FROM lesson_session ls
+            <where>
+                <if test="fromDate != null">
+                    ls.session_date >= #{fromDate}
+                </if>
+                <if test="toDate != null">
+                    AND ls.session_date &lt;= #{toDate}
+                </if>
+            </where>
+            GROUP BY ls.offering_id
+        ) se ON se.offering_id = o.id
+        LEFT JOIN (
+            SELECT ls.offering_id,
+                   ROUND(
+                       100.0 * SUM(
+                           CASE WHEN a.status IN ('PRESENT', 'LATE')
+                                THEN 1 ELSE 0 END
+                       ) / NULLIF(COUNT(a.id), 0),
+                       1
+                   ) AS attendanceRate
+            FROM lesson_session ls
+            JOIN attendance a ON a.session_id = ls.id
+            WHERE ls.status = 'COMPLETED'
+              <if test="fromDate != null">
+                  AND ls.session_date >= #{fromDate}
+              </if>
+              <if test="toDate != null">
+                  AND ls.session_date &lt;= #{toDate}
+              </if>
+            GROUP BY ls.offering_id
+        ) att ON att.offering_id = o.id
+        LEFT JOIN (
+            SELECT ce.offering_id,
+                   COUNT(*) AS evaluationCount,
+                   ROUND(AVG(ce.rating), 2) AS averageRating,
+                   ROUND(
+                       100.0 * SUM(
+                           CASE WHEN ce.rating >= 4 THEN 1 ELSE 0 END
+                       ) / NULLIF(COUNT(*), 0),
+                       1
+                   ) AS satisfactionRate
+            FROM course_evaluation ce
+            <where>
+                <if test="fromDate != null">
+                    DATE(ce.submitted_at) >= #{fromDate}
+                </if>
+                <if test="toDate != null">
+                    AND DATE(ce.submitted_at) &lt;= #{toDate}
+                </if>
+            </where>
+            GROUP BY ce.offering_id
+        ) ev ON ev.offering_id = o.id
+        <where>
+            <if test="schoolId != null">
+                o.school_id = #{schoolId}
+            </if>
+            <if test="termId != null">
+                AND (
+                    o.term_id = #{termId}
+                    OR (
+                        o.term_id IS NULL
+                        AND EXISTS (
+                            SELECT 1
+                            FROM academic_term legacy_term
+                            WHERE legacy_term.id = #{termId}
+                              AND o.term IN (
+                                  legacy_term.term_code,
+                                  legacy_term.term_name
+                              )
+                        )
+                    )
+                )
+            </if>
+            <if test="fromDate != null">
+                AND o.end_date >= #{fromDate}
+            </if>
+            <if test="toDate != null">
+                AND o.start_date &lt;= #{toDate}
+            </if>
+            <if test="category != null">
+                AND c.category = #{category}
+            </if>
+            <if test="status != null">
+                AND o.status = #{status}
+            </if>
+        </where>
+        ORDER BY s.school_name, termName, c.category, c.course_name,
+                 o.offering_code
+    </select>
+</mapper>

@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the encrypted after-school service backup every day
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+RandomizedDelaySec=30m
+AccuracySec=1m
+Persistent=true
+Unit=after-school-backup.service
+
+[Install]
+WantedBy=timers.target

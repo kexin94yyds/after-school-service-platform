@@ -1,0 +1,4 @@
+# One or more age public recipients, one per line. Public recipients may be
+# backed up with the deployment configuration; keep the matching identity
+# offline and never copy it to the application server.
+age1replace-this-placeholder-with-a-real-public-recipient

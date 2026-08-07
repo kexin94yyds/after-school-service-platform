@@ -1,0 +1,366 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.afterschool.platform.supervision.SupervisionMapper">
+    <resultMap id="alertDraft" type="com.afterschool.platform.supervision.AlertDraft">
+        <result property="schoolId" column="school_id"/>
+        <result property="offeringId" column="offering_id"/>
+        <result property="sessionId" column="session_id"/>
+        <result property="alertType" column="alert_type"/>
+        <result property="dedupKey" column="dedup_key"/>
+        <result property="severity" column="severity"/>
+        <result property="title" column="title"/>
+        <result property="description" column="description"/>
+        <result property="metricValue" column="metric_value"/>
+        <result property="thresholdValue" column="threshold_value"/>
+    </resultMap>
+
+    <resultMap id="alertState" type="com.afterschool.platform.supervision.SupervisionAlert">
+        <id property="id" column="id"/>
+        <result property="schoolId" column="school_id"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
+    <select id="findOverdueAttendanceCandidates" resultMap="alertDraft">
+        SELECT ls.school_id,
+               ls.offering_id,
+               ls.id AS session_id,
+               'OVERDUE_ATTENDANCE' AS alert_type,
+               CONCAT('SESSION:', ls.id) AS dedup_key,
+               'HIGH' AS severity,
+               '课次考勤逾期未完成' AS title,
+               CONCAT(
+                   '课次已结束，但仍有 ',
+                   COUNT(DISTINCT e.student_id) - COUNT(DISTINCT a.student_id),
+                   ' 名学生未完成考勤记录'
+               ) AS description,
+               COUNT(DISTINCT e.student_id) - COUNT(DISTINCT a.student_id)
+                   AS metric_value,
+               0 AS threshold_value
+        FROM lesson_session ls
+        JOIN course_offering o ON o.id = ls.offering_id
+        JOIN enrollment e
+          ON e.offering_id = ls.offering_id
+         AND e.enrolled_at &lt;= TIMESTAMP(ls.session_date, ls.start_time)
+         AND (
+             e.canceled_at IS NULL
+             OR e.canceled_at &gt;= TIMESTAMP(ls.session_date, ls.start_time)
+         )
+        LEFT JOIN attendance a
+          ON a.session_id = ls.id
+         AND a.student_id = e.student_id
+        WHERE ls.status = 'SCHEDULED'
+          AND TIMESTAMP(ls.session_date, ls.end_time) &lt; #{now}
+          <if test="schoolId != null">
+              AND ls.school_id = #{schoolId}
+          </if>
+          <if test="termId != null">
+              AND (
+                  o.term_id = #{termId}
+                  OR (
+                      o.term_id IS NULL
+                      AND EXISTS (
+                          SELECT 1
+                          FROM academic_term legacy_term
+                          WHERE legacy_term.id = #{termId}
+                            AND o.term IN (
+                                legacy_term.term_code,
+                                legacy_term.term_name
+                            )
+                      )
+                  )
+              )
+          </if>
+        GROUP BY ls.id, ls.school_id, ls.offering_id
+        HAVING COUNT(DISTINCT e.student_id) > COUNT(DISTINCT a.student_id)
+    </select>
+
+    <select id="findOfferingsWithoutSessions" resultMap="alertDraft">
+        SELECT o.school_id,
+               o.id AS offering_id,
+               NULL AS session_id,
+               'OFFERING_NO_SESSIONS' AS alert_type,
+               CONCAT('OFFERING:', o.id) AS dedup_key,
+               'HIGH' AS severity,
+               '课程已开课但未生成课次' AS title,
+               '课程已到开课时间，系统中仍没有任何课次安排' AS description,
+               0 AS metric_value,
+               1 AS threshold_value
+        FROM course_offering o
+        WHERE o.status IN ('PUBLISHED', 'CLOSED', 'FINISHED')
+          AND TIMESTAMP(o.start_date, o.end_time) &lt; #{now}
+          AND NOT EXISTS (
+              SELECT 1
+              FROM lesson_session ls
+              WHERE ls.offering_id = o.id
+          )
+          <if test="schoolId != null">
+              AND o.school_id = #{schoolId}
+          </if>
+          <if test="termId != null">
+              AND (
+                  o.term_id = #{termId}
+                  OR (
+                      o.term_id IS NULL
+                      AND EXISTS (
+                          SELECT 1
+                          FROM academic_term legacy_term
+                          WHERE legacy_term.id = #{termId}
+                            AND o.term IN (
+                                legacy_term.term_code,
+                                legacy_term.term_name
+                            )
+                      )
+                  )
+              )
+          </if>
+    </select>
+
+    <select id="findLowAttendanceCandidates" resultMap="alertDraft">
+        SELECT o.school_id,
+               o.id AS offering_id,
+               NULL AS session_id,
+               'LOW_ATTENDANCE' AS alert_type,
+               CONCAT('OFFERING:', o.id) AS dedup_key,
+               'MEDIUM' AS severity,
+               '课程总体出勤率偏低' AS title,
+               CONCAT(
+                   '已完成课次的总体出勤率为 ',
+                   ROUND(
+                       100.0 * SUM(
+                           CASE WHEN a.status IN ('PRESENT', 'LATE')
+                                THEN 1 ELSE 0 END
+                       ) / COUNT(a.id),
+                       1
+                   ),
+                   '%，低于监管阈值'
+               ) AS description,
+               SUM(
+                   CASE WHEN a.status IN ('PRESENT', 'LATE')
+                        THEN 1 ELSE 0 END
+               ) / COUNT(a.id) AS metric_value,
+               #{threshold} AS threshold_value
+        FROM course_offering o
+        JOIN lesson_session ls
+          ON ls.offering_id = o.id
+         AND ls.status = 'COMPLETED'
+        JOIN attendance a ON a.session_id = ls.id
+        WHERE o.status &lt;> 'CANCELED'
+          <if test="schoolId != null">
+              AND o.school_id = #{schoolId}
+          </if>
+          <if test="termId != null">
+              AND (
+                  o.term_id = #{termId}
+                  OR (
+                      o.term_id IS NULL
+                      AND EXISTS (
+                          SELECT 1
+                          FROM academic_term legacy_term
+                          WHERE legacy_term.id = #{termId}
+                            AND o.term IN (
+                                legacy_term.term_code,
+                                legacy_term.term_name
+                            )
+                      )
+                  )
+              )
+          </if>
+        GROUP BY o.id, o.school_id
+        HAVING SUM(
+                   CASE WHEN a.status IN ('PRESENT', 'LATE')
+                        THEN 1 ELSE 0 END
+               ) / COUNT(a.id) &lt; #{threshold}
+    </select>
+
+    <insert id="insertAlert">
+        INSERT INTO supervision_alert (
+            school_id,
+            offering_id,
+            session_id,
+            alert_type,
+            dedup_key,
+            scan_run_id,
+            severity,
+            title,
+            description,
+            metric_value,
+            threshold_value,
+            rectification_deadline
+        ) VALUES (
+            #{draft.schoolId},
+            #{draft.offeringId},
+            #{draft.sessionId},
+            #{draft.alertType},
+            #{draft.dedupKey},
+            #{scanRunId},
+            #{draft.severity},
+            #{draft.title},
+            #{draft.description},
+            #{draft.metricValue},
+            #{draft.thresholdValue},
+            #{deadline}
+        )
+        ON DUPLICATE KEY UPDATE dedup_key = dedup_key
+    </insert>
+
+    <select id="findAlertIdentityByDedup"
+            resultType="com.afterschool.platform.supervision.AlertIdentity">
+        SELECT id,
+               scan_run_id AS scanRunId
+        FROM supervision_alert
+        WHERE school_id = #{schoolId}
+          AND alert_type = #{alertType}
+          AND dedup_key = #{dedupKey}
+          AND status &lt;> 'CLOSED'
+    </select>
+
+    <insert id="insertAction">
+        INSERT INTO supervision_alert_action (
+            school_id,
+            alert_id,
+            from_status,
+            to_status,
+            action_type,
+            comment,
+            actor_id,
+            actor_role
+        ) VALUES (
+            #{schoolId},
+            #{alertId},
+            #{fromStatus},
+            #{toStatus},
+            #{actionType},
+            #{comment},
+            #{actorId},
+            #{actorRole}
+        )
+    </insert>
+
+    <sql id="alertViewColumns">
+        sa.id,
+        sa.school_id AS schoolId,
+        s.school_code AS schoolCode,
+        s.school_name AS schoolName,
+        sa.offering_id AS offeringId,
+        o.offering_code AS offeringCode,
+        o.term_id AS termId,
+        COALESCE(at.term_name, o.term) AS termName,
+        c.course_name AS courseName,
+        c.category,
+        t.full_name AS teacherName,
+        sa.session_id AS sessionId,
+        ls.session_date AS sessionDate,
+        ls.start_time AS sessionStartTime,
+        ls.end_time AS sessionEndTime,
+        sa.alert_type AS alertType,
+        sa.severity,
+        sa.status,
+        sa.title,
+        sa.description,
+        sa.metric_value AS metricValue,
+        sa.threshold_value AS thresholdValue,
+        sa.rectification_deadline AS rectificationDeadline,
+        sa.detected_at AS detectedAt,
+        sa.closed_at AS closedAt,
+        sa.updated_at AS updatedAt,
+        CASE
+            WHEN sa.status &lt;> 'CLOSED'
+             AND sa.rectification_deadline &lt; CURRENT_TIMESTAMP(3)
+            THEN TRUE ELSE FALSE
+        END AS overdue
+    </sql>
+
+    <select id="listAlerts" resultType="map">
+        SELECT <include refid="alertViewColumns"/>
+        FROM supervision_alert sa
+        JOIN school s ON s.id = sa.school_id
+        JOIN course_offering o ON o.id = sa.offering_id
+        JOIN course c ON c.id = o.course_id
+        JOIN teacher t ON t.id = o.teacher_id
+        LEFT JOIN academic_term at ON at.id = o.term_id
+        LEFT JOIN lesson_session ls ON ls.id = sa.session_id
+        <where>
+            <if test="schoolId != null">
+                sa.school_id = #{schoolId}
+            </if>
+            <if test="alertType != null">
+                AND sa.alert_type = #{alertType}
+            </if>
+            <if test="status != null">
+                AND sa.status = #{status}
+            </if>
+            <if test="detectedFrom != null">
+                AND sa.detected_at >= #{detectedFrom}
+            </if>
+            <if test="detectedTo != null">
+                AND sa.detected_at &lt;= #{detectedTo}
+            </if>
+        </where>
+        ORDER BY
+            CASE sa.status
+                WHEN 'OPEN' THEN 1
+                WHEN 'RETURNED' THEN 2
+                WHEN 'RECTIFYING' THEN 3
+                WHEN 'WAITING_VERIFY' THEN 4
+                WHEN 'ACKNOWLEDGED' THEN 5
+                ELSE 6
+            END,
+            sa.rectification_deadline,
+            sa.id DESC
+    </select>
+
+    <select id="lockAlert" resultMap="alertState">
+        SELECT id, school_id, status
+        FROM supervision_alert
+        WHERE id = #{id}
+          <if test="schoolId != null">
+              AND school_id = #{schoolId}
+          </if>
+        FOR UPDATE
+    </select>
+
+    <select id="findAlert" resultMap="alertState">
+        SELECT id, school_id, status
+        FROM supervision_alert
+        WHERE id = #{id}
+          <if test="schoolId != null">
+              AND school_id = #{schoolId}
+          </if>
+    </select>
+
+    <update id="updateStatus">
+        UPDATE supervision_alert
+        SET status = #{toStatus},
+            closed_at = CASE
+                WHEN #{toStatus} = 'CLOSED' THEN CURRENT_TIMESTAMP(3)
+                ELSE NULL
+            END
+        WHERE id = #{id}
+          AND status = #{fromStatus}
+    </update>
+
+    <select id="listActions" resultType="map">
+        SELECT saa.id,
+               saa.alert_id AS alertId,
+               saa.from_status AS fromStatus,
+               saa.to_status AS toStatus,
+               saa.action_type AS actionType,
+               saa.comment,
+               saa.actor_id AS actorId,
+               u.display_name AS actorName,
+               saa.actor_role AS actorRole,
+               saa.acted_at AS actedAt
+        FROM supervision_alert_action saa
+        JOIN supervision_alert sa
+          ON sa.id = saa.alert_id
+         AND sa.school_id = saa.school_id
+        JOIN sys_user u ON u.id = saa.actor_id
+        WHERE saa.alert_id = #{alertId}
+          <if test="schoolId != null">
+              AND saa.school_id = #{schoolId}
+          </if>
+        ORDER BY saa.acted_at, saa.id
+    </select>
+</mapper>

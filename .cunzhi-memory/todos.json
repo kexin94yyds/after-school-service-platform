@@ -1,0 +1,18 @@
+{
+  "objective": "补齐课后服务平台正式生产运维闭环",
+  "problem_id": "P-2026-2311",
+  "baseline": "Ubuntu 24.04 + systemd/Nginx + 独立 MySQL",
+  "items": [
+    {"id": 1, "title": "真实健康检查、指标与优雅停机", "status": "completed"},
+    {"id": 2, "title": "Nginx 限流、安全头与代理超时", "status": "completed"},
+    {"id": 3, "title": "systemd 后端托管、不可变发布与回滚", "status": "completed"},
+    {"id": 4, "title": "age 加密数据库备份、恢复与定时任务", "status": "completed"},
+    {"id": 5, "title": "生产预检、本地健康监测与告警接入边界", "status": "completed"},
+    {"id": 6, "title": "验收合同、生产 Runbook 与全链路验证", "status": "completed"},
+    {"id": 7, "title": "P-2026-2315 备份 service 失败告警", "status": "completed"},
+    {"id": 8, "title": "P-2026-2316 Let's Encrypt 链接预检", "status": "completed"},
+    {"id": 9, "title": "P-2026-2317 统一 12 位密码策略", "status": "completed"},
+    {"id": 10, "title": "P-2026-2318 后端漏洞门禁、SBOM 与 CI", "status": "completed"},
+    {"id": 11, "title": "P-2026-2319 生产示例与 Runbook 对齐", "status": "completed"}
+  ]
+}

@@ -1,0 +1,9 @@
+# Install as /etc/after-school-service/mysql-backup.cnf with mode 0600.
+# Replace every placeholder. Never commit the real file.
+[client]
+host=db.example.internal
+port=3306
+user=after_school_backup
+password=replace-with-a-dedicated-backup-password
+ssl-mode=VERIFY_IDENTITY
+ssl-ca=/etc/ssl/certs/mysql-production-ca.pem

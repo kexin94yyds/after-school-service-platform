@@ -1,0 +1,242 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.afterschool.platform.evaluation.EvaluationMapper">
+    <resultMap id="eligibility" type="com.afterschool.platform.evaluation.EvaluationEligibility">
+        <result property="enrollmentId" column="enrollment_id"/>
+        <result property="schoolId" column="school_id"/>
+    </resultMap>
+
+    <select id="lockStudent" resultType="long">
+        SELECT id
+        FROM student
+        WHERE id = #{studentId}
+          AND school_id = #{schoolId}
+        FOR UPDATE
+    </select>
+
+    <select id="lockOffering" resultType="long">
+        SELECT id
+        FROM course_offering
+        WHERE id = #{offeringId}
+          AND school_id = #{schoolId}
+        FOR UPDATE
+    </select>
+
+    <select id="lockEligibility" resultMap="eligibility">
+        SELECT e.id AS enrollment_id,
+               e.school_id
+        FROM enrollment e
+        JOIN student_guardian sg
+          ON sg.student_id = e.student_id
+         AND sg.guardian_id = #{guardianId}
+         AND sg.is_active = TRUE
+        JOIN guardian g ON g.id = sg.guardian_id
+        JOIN sys_user gu
+          ON gu.id = g.user_id
+         AND gu.school_id = e.school_id
+        WHERE e.student_id = #{studentId}
+          AND e.offering_id = #{offeringId}
+          AND e.school_id = #{schoolId}
+          AND e.status = 'ENROLLED'
+          AND EXISTS (
+              SELECT 1
+              FROM lesson_session ls
+              WHERE ls.offering_id = e.offering_id
+                AND ls.status = 'COMPLETED'
+                AND TIMESTAMP(ls.session_date, ls.start_time)
+                    >= e.enrolled_at
+          )
+        FOR UPDATE
+    </select>
+
+    <select id="countEvaluation" resultType="int">
+        SELECT COUNT(*)
+        FROM course_evaluation
+        WHERE offering_id = #{offeringId}
+          AND student_id = #{studentId}
+    </select>
+
+    <insert id="insertEvaluation">
+        INSERT INTO course_evaluation (
+            school_id,
+            offering_id,
+            enrollment_id,
+            student_id,
+            guardian_id,
+            rating,
+            comment
+        ) VALUES (
+            #{schoolId},
+            #{offeringId},
+            #{enrollmentId},
+            #{studentId},
+            #{guardianId},
+            #{rating},
+            #{comment}
+        )
+    </insert>
+
+    <sql id="evaluationViewColumns">
+        ce.id,
+        ce.school_id AS schoolId,
+        s.school_name AS schoolName,
+        ce.offering_id AS offeringId,
+        o.offering_code AS offeringCode,
+        o.term_id AS termId,
+        COALESCE(at.term_name, o.term) AS termName,
+        c.id AS courseId,
+        c.course_name AS courseName,
+        c.category,
+        t.id AS teacherId,
+        t.full_name AS teacherName,
+        ce.student_id AS studentId,
+        st.student_no AS studentNo,
+        st.full_name AS studentName,
+        ce.guardian_id AS guardianId,
+        g.full_name AS guardianName,
+        ce.rating,
+        ce.comment,
+        ce.submitted_at AS submittedAt
+    </sql>
+
+    <select id="findEvaluation" resultType="map">
+        SELECT <include refid="evaluationViewColumns"/>
+        FROM course_evaluation ce
+        JOIN school s ON s.id = ce.school_id
+        JOIN course_offering o ON o.id = ce.offering_id
+        LEFT JOIN academic_term at ON at.id = o.term_id
+        JOIN course c ON c.id = o.course_id
+        JOIN teacher t ON t.id = o.teacher_id
+        JOIN student st ON st.id = ce.student_id
+        JOIN guardian g ON g.id = ce.guardian_id
+        WHERE ce.offering_id = #{offeringId}
+          AND ce.student_id = #{studentId}
+    </select>
+
+    <select id="listGuardianEvaluations" resultType="map">
+        SELECT ce.id,
+               ce.student_id AS studentId,
+               ce.offering_id AS offeringId,
+               ce.rating,
+               ce.submitted_at AS submittedAt
+        FROM course_evaluation ce
+        JOIN student_guardian sg
+          ON sg.student_id = ce.student_id
+         AND sg.guardian_id = ce.guardian_id
+         AND sg.is_active = TRUE
+        WHERE ce.guardian_id = #{guardianId}
+          AND ce.school_id = #{schoolId}
+        ORDER BY ce.submitted_at DESC, ce.id DESC
+    </select>
+
+    <select id="listEvaluations" resultType="map">
+        SELECT <include refid="evaluationViewColumns"/>
+        FROM course_evaluation ce
+        JOIN school s ON s.id = ce.school_id
+        JOIN course_offering o ON o.id = ce.offering_id
+        LEFT JOIN academic_term at ON at.id = o.term_id
+        JOIN course c ON c.id = o.course_id
+        JOIN teacher t ON t.id = o.teacher_id
+        JOIN student st ON st.id = ce.student_id
+        JOIN guardian g ON g.id = ce.guardian_id
+        <where>
+            <if test="schoolId != null">
+                ce.school_id = #{schoolId}
+            </if>
+            <if test="termId != null">
+                AND (
+                    o.term_id = #{termId}
+                    OR (
+                        o.term_id IS NULL
+                        AND EXISTS (
+                            SELECT 1
+                            FROM academic_term legacy_term
+                            WHERE legacy_term.id = #{termId}
+                              AND o.term IN (
+                                  legacy_term.term_code,
+                                  legacy_term.term_name
+                              )
+                        )
+                    )
+                )
+            </if>
+            <if test="category != null">
+                AND c.category = #{category}
+            </if>
+            <if test="minRating != null">
+                AND ce.rating >= #{minRating}
+            </if>
+            <if test="maxRating != null">
+                AND ce.rating &lt;= #{maxRating}
+            </if>
+            <if test="submittedFrom != null">
+                AND ce.submitted_at >= #{submittedFrom}
+            </if>
+            <if test="submittedTo != null">
+                AND ce.submitted_at &lt;= #{submittedTo}
+            </if>
+        </where>
+        ORDER BY ce.submitted_at DESC, ce.id DESC
+    </select>
+
+    <select id="evaluationSummary" resultType="map">
+        SELECT COUNT(ce.id) AS evaluationCount,
+               COALESCE(ROUND(AVG(ce.rating), 2), 0) AS averageRating,
+               COALESCE(ROUND(
+                   100.0 * SUM(CASE WHEN ce.rating >= 4 THEN 1 ELSE 0 END)
+                   / NULLIF(COUNT(ce.id), 0),
+                   1
+               ), 0) AS satisfactionRate,
+               COALESCE(SUM(
+                   CASE WHEN ce.rating = 5 THEN 1 ELSE 0 END
+               ), 0) AS rating5Count,
+               COALESCE(SUM(
+                   CASE WHEN ce.rating = 4 THEN 1 ELSE 0 END
+               ), 0) AS rating4Count,
+               COALESCE(SUM(
+                   CASE WHEN ce.rating = 3 THEN 1 ELSE 0 END
+               ), 0) AS rating3Count,
+               COALESCE(SUM(
+                   CASE WHEN ce.rating = 2 THEN 1 ELSE 0 END
+               ), 0) AS rating2Count,
+               COALESCE(SUM(
+                   CASE WHEN ce.rating = 1 THEN 1 ELSE 0 END
+               ), 0) AS rating1Count
+        FROM course_evaluation ce
+        JOIN course_offering o ON o.id = ce.offering_id
+        JOIN course c ON c.id = o.course_id
+        <where>
+            <if test="schoolId != null">
+                ce.school_id = #{schoolId}
+            </if>
+            <if test="termId != null">
+                AND (
+                    o.term_id = #{termId}
+                    OR (
+                        o.term_id IS NULL
+                        AND EXISTS (
+                            SELECT 1
+                            FROM academic_term legacy_term
+                            WHERE legacy_term.id = #{termId}
+                              AND o.term IN (
+                                  legacy_term.term_code,
+                                  legacy_term.term_name
+                              )
+                        )
+                    )
+                )
+            </if>
+            <if test="category != null">
+                AND c.category = #{category}
+            </if>
+            <if test="submittedFrom != null">
+                AND ce.submitted_at >= #{submittedFrom}
+            </if>
+            <if test="submittedTo != null">
+                AND ce.submitted_at &lt;= #{submittedTo}
+            </if>
+        </where>
+    </select>
+</mapper>

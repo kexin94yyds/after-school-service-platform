@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.afterschool.platform.organization.OrganizationMapper">
+    <sql id="schoolColumns">
+        s.id,
+        s.school_code AS schoolCode,
+        s.school_name AS schoolName,
+        s.district_code AS districtCode,
+        s.address,
+        s.contact_phone AS contactPhone,
+        s.status,
+        s.created_at AS createdAt,
+        s.updated_at AS updatedAt
+    </sql>
+
+    <select id="listSchools" resultType="map">
+        SELECT <include refid="schoolColumns"/>
+        FROM school s
+        <if test="schoolId != null">WHERE s.id = #{schoolId}</if>
+        ORDER BY s.school_name, s.id
+    </select>
+
+    <select id="findSchoolByCode" resultType="map">
+        SELECT <include refid="schoolColumns"/>
+        FROM school s
+        WHERE s.school_code = #{schoolCode}
+    </select>
+
+    <insert id="insertSchool">
+        INSERT INTO school (
+            school_code, school_name, district_code, address, contact_phone, status
+        ) VALUES (
+            #{schoolCode}, #{schoolName}, #{districtCode}, #{address}, #{contactPhone}, #{status}
+        )
+    </insert>
+
+    <update id="updateSchool">
+        UPDATE school
+        SET school_name = #{schoolName},
+            district_code = #{districtCode},
+            address = #{address},
+            contact_phone = #{contactPhone},
+            status = #{status}
+        WHERE id = #{id}
+    </update>
+
+    <select id="schoolExists" resultType="int">
+        SELECT COUNT(*)
+        FROM school
+        WHERE id = #{schoolId}
+    </select>
+
+    <sql id="schoolAdminColumns">
+        u.id,
+        u.school_id AS schoolId,
+        s.school_name AS schoolName,
+        u.username,
+        u.display_name AS displayName,
+        u.mobile,
+        u.enabled,
+        u.last_login_at AS lastLoginAt,
+        u.created_at AS createdAt,
+        u.updated_at AS updatedAt
+    </sql>
+
+    <select id="listSchoolAdmins" resultType="map">
+        SELECT <include refid="schoolAdminColumns"/>
+        FROM sys_user u
+        JOIN school s ON s.id = u.school_id
+        JOIN sys_role r ON r.id = u.role_id
+        WHERE u.school_id = #{schoolId}
+          AND r.role_code = 'SCHOOL_ADMIN'
+        ORDER BY u.display_name, u.id
+    </select>
+
+    <select id="findSchoolAdminByUsername" resultType="map">
+        SELECT <include refid="schoolAdminColumns"/>
+        FROM sys_user u
+        JOIN school s ON s.id = u.school_id
+        JOIN sys_role r ON r.id = u.role_id
+        WHERE u.school_id = #{schoolId}
+          AND u.username = #{username}
+          AND r.role_code = 'SCHOOL_ADMIN'
+    </select>
+
+    <select id="findSchoolAdmin" resultType="map">
+        SELECT <include refid="schoolAdminColumns"/>
+        FROM sys_user u
+        JOIN school s ON s.id = u.school_id
+        JOIN sys_role r ON r.id = u.role_id
+        WHERE u.school_id = #{schoolId}
+          AND u.id = #{id}
+          AND r.role_code = 'SCHOOL_ADMIN'
+    </select>
+
+    <insert id="insertSchoolAdmin">
+        INSERT INTO sys_user (
+            school_id, role_id, username, password_hash, display_name, mobile, enabled
+        ) VALUES (
+            #{schoolId},
+            (SELECT id FROM sys_role WHERE role_code = 'SCHOOL_ADMIN' AND enabled = TRUE),
+            #{username},
+            #{passwordHash},
+            #{displayName},
+            #{mobile},
+            #{enabled}
+        )
+    </insert>
+
+    <update id="updateSchoolAdmin">
+        UPDATE sys_user u
+        JOIN sys_role r ON r.id = u.role_id
+        SET u.username = #{username},
+            u.display_name = #{displayName},
+            u.mobile = #{mobile},
+            u.enabled = #{enabled}
+            <if test="passwordHash != null">, u.password_hash = #{passwordHash}</if>
+        WHERE u.id = #{id}
+          AND u.school_id = #{schoolId}
+          AND r.role_code = 'SCHOOL_ADMIN'
+    </update>
+
+    <sql id="classColumns">
+        c.id,
+        c.school_id AS schoolId,
+        s.school_name AS schoolName,
+        c.class_name AS className,
+        c.grade,
+        c.school_year AS schoolYear,
+        c.status,
+        c.created_at AS createdAt,
+        c.updated_at AS updatedAt
+    </sql>
+
+    <select id="listClasses" resultType="map">
+        SELECT <include refid="classColumns"/>
+        FROM school_class c
+        JOIN school s ON s.id = c.school_id
+        <if test="schoolId != null">WHERE c.school_id = #{schoolId}</if>
+        ORDER BY c.school_year DESC, c.grade, c.class_name
+    </select>
+
+    <select id="findClassByNaturalKey" resultType="map">
+        SELECT <include refid="classColumns"/>
+        FROM school_class c
+        JOIN school s ON s.id = c.school_id
+        WHERE c.school_id = #{schoolId}
+          AND c.school_year = #{schoolYear}
+          AND c.grade = #{grade}
+          AND c.class_name = #{className}
+    </select>
+
+    <insert id="insertClass">
+        INSERT INTO school_class (school_id, class_name, grade, school_year, status)
+        VALUES (#{schoolId}, #{className}, #{grade}, #{schoolYear}, #{status})
+    </insert>
+
+    <update id="updateClass">
+        UPDATE school_class
+        SET class_name = #{className},
+            grade = #{grade},
+            school_year = #{schoolYear},
+            status = #{status}
+        WHERE id = #{id}
+          AND school_id = #{schoolId}
+    </update>
+</mapper>
