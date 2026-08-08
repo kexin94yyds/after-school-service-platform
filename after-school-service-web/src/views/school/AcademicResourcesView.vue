@@ -34,6 +34,7 @@ import type {
   EntityField,
   FormValues,
 } from '@/components/entity-crud'
+import { useLongFormGuard } from '@/composables/useLongFormGuard'
 import { useSessionStore } from '@/stores/session'
 import {
   formNullableString,
@@ -87,6 +88,15 @@ const planForm = reactive<{
   planCode: '',
   planName: '',
   description: '',
+})
+const {
+  beforeClose: beforePlanDialogClose,
+  captureBaseline: capturePlanBaseline,
+  requestClose: requestPlanDialogClose,
+} = useLongFormGuard({
+  visible: planDialogVisible,
+  saving: planSaving,
+  snapshot: () => ({ ...planForm }),
 })
 
 const selectedTerm = computed(() =>
@@ -390,6 +400,7 @@ function openCreatePlan(): void {
     description: '',
   })
   planDialogError.value = ''
+  capturePlanBaseline()
   planDialogVisible.value = true
 }
 
@@ -403,6 +414,7 @@ function openEditPlan(plan: ServicePlan): void {
     description: plan.description ?? '',
   })
   planDialogError.value = ''
+  capturePlanBaseline()
   planDialogVisible.value = true
 }
 
@@ -437,6 +449,7 @@ async function savePlan(): Promise<void> {
       await academicApi.updateServicePlan(editingPlanId.value, payload)
     }
     selectedTermId.value = planForm.termId
+    capturePlanBaseline()
     planDialogVisible.value = false
     ElMessage.success(editingPlanId.value === null ? '计划已创建' : '计划已保存')
     await loadPlans()
@@ -813,6 +826,7 @@ onMounted(async () => {
       width="min(660px, calc(100vw - 32px))"
       destroy-on-close
       :close-on-click-modal="false"
+      :before-close="beforePlanDialogClose"
     >
       <el-alert
         v-if="planDialogError"
@@ -873,7 +887,9 @@ onMounted(async () => {
         </div>
       </el-form>
       <template #footer>
-        <el-button @click="planDialogVisible = false">取消</el-button>
+        <el-button :disabled="planSaving" @click="requestPlanDialogClose">
+          取消
+        </el-button>
         <el-button type="primary" :loading="planSaving" @click="savePlan">
           保存草稿
         </el-button>

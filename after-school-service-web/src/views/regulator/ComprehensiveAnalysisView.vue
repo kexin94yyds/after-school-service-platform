@@ -37,6 +37,7 @@ const referenceLoading = ref(false)
 const exporting = ref(false)
 const error = ref('')
 const referenceError = ref('')
+let dataLoadVersion = 0
 
 const filters = reactive<{
   schoolId: number | null
@@ -191,26 +192,53 @@ async function loadReferences(): Promise<void> {
 }
 
 async function loadData(options: { saveQuery?: boolean } = {}): Promise<void> {
+  const requestVersion = ++dataLoadVersion
+  const performanceQuery = reportFilters()
+  const evaluationQuery = evaluationFilters()
   loading.value = true
   error.value = ''
   try {
     if (options.saveQuery) await saveFiltersToUrl()
-    const evaluationQuery = evaluationFilters()
-    const [performanceRows, summary, evaluationRows] = await Promise.all([
-      extendedReportsApi.getCoursePerformance(reportFilters()),
+    const [performanceResult, summaryResult, evaluationResult] =
+      await Promise.allSettled([
+      extendedReportsApi.getCoursePerformance(performanceQuery),
       evaluationApi.summary(evaluationQuery),
       evaluationApi.list(evaluationQuery),
     ])
-    rows.value = performanceRows
-    evaluationSummary.value = summary
-    evaluations.value = evaluationRows
+    if (requestVersion !== dataLoadVersion) return
+
+    const messages: string[] = []
+    if (performanceResult.status === 'fulfilled') {
+      rows.value = performanceResult.value
+    } else {
+      rows.value = []
+      messages.push(
+        getErrorMessage(performanceResult.reason, '课程绩效数据加载失败。'),
+      )
+    }
+    if (summaryResult.status === 'fulfilled') {
+      evaluationSummary.value = summaryResult.value
+    } else {
+      evaluationSummary.value = null
+      messages.push(
+        getErrorMessage(summaryResult.reason, '评价汇总数据加载失败。'),
+      )
+    }
+    if (evaluationResult.status === 'fulfilled') {
+      evaluations.value = evaluationResult.value
+    } else {
+      evaluations.value = []
+      messages.push(
+        getErrorMessage(evaluationResult.reason, '评价明细加载失败。'),
+      )
+    }
+    error.value = messages.join(' ')
   } catch (loadError) {
-    rows.value = []
-    evaluations.value = []
-    evaluationSummary.value = null
-    error.value = getErrorMessage(loadError, '综合分析数据加载失败。')
+    if (requestVersion === dataLoadVersion) {
+      error.value = getErrorMessage(loadError, '综合分析数据加载失败。')
+    }
   } finally {
-    loading.value = false
+    if (requestVersion === dataLoadVersion) loading.value = false
   }
 }
 

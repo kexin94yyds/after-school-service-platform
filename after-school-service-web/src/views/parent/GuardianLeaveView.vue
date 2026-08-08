@@ -14,6 +14,7 @@ import {
   type LeaveStatus,
 } from '@/api/leaveCorrections'
 import PageHeader from '@/components/PageHeader.vue'
+import { useLongFormGuard } from '@/composables/useLongFormGuard'
 import { formatDate, formatDateTime, formatTime } from '@/utils/format'
 
 type WorkflowTagType = 'success' | 'warning' | 'danger' | 'info'
@@ -36,6 +37,15 @@ const leaveDialogVisible = ref(false)
 const selectedSession = ref<GuardianLeaveSession | null>(null)
 const leaveStudentId = ref<number | null>(null)
 const leaveReason = ref('')
+const {
+  beforeClose: beforeLeaveDialogClose,
+  captureBaseline: captureLeaveBaseline,
+  requestClose: requestLeaveDialogClose,
+} = useLongFormGuard({
+  visible: leaveDialogVisible,
+  saving: submitting,
+  snapshot: () => ({ reason: leaveReason.value }),
+})
 let initialized = false
 let sessionRequestId = 0
 let leaveRequestsRequestId = 0
@@ -220,6 +230,7 @@ function openLeaveDialog(session: GuardianLeaveSession): void {
   leaveStudentId.value = studentId
   selectedSession.value = currentSession
   leaveReason.value = ''
+  captureLeaveBaseline()
   leaveDialogVisible.value = true
 }
 
@@ -237,6 +248,8 @@ async function submitLeave(): Promise<void> {
     )
   ) {
     ElMessage.warning('学生或课次信息已变化，请重新发起请假。')
+    leaveReason.value = ''
+    captureLeaveBaseline()
     leaveDialogVisible.value = false
     selectedSession.value = null
     leaveStudentId.value = null
@@ -254,6 +267,7 @@ async function submitLeave(): Promise<void> {
       studentId,
       reason,
     )
+    captureLeaveBaseline()
     leaveDialogVisible.value = false
     selectedSession.value = null
     leaveStudentId.value = null
@@ -522,6 +536,7 @@ onMounted(async () => {
       title="申请课次请假"
       width="min(520px, 92vw)"
       destroy-on-close
+      :before-close="beforeLeaveDialogClose"
     >
       <div v-if="selectedSession" class="dialog-session-summary">
         <strong>{{ selectedSession.courseName }}</strong>
@@ -544,7 +559,7 @@ onMounted(async () => {
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button :disabled="submitting" @click="leaveDialogVisible = false">
+        <el-button :disabled="submitting" @click="requestLeaveDialogClose">
           取消
         </el-button>
         <el-button type="primary" :loading="submitting" @click="submitLeave">

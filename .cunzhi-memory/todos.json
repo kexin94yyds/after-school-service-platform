@@ -1,5 +1,5 @@
 {
-  "objective": "补齐课后服务平台正式生产运维闭环",
+  "objective": "补齐课后服务平台现有产品范围与正式生产运维闭环",
   "problem_id": "P-2026-2311",
   "baseline": "Ubuntu 24.04 + systemd/Nginx + 独立 MySQL",
   "items": [
@@ -13,6 +13,13 @@
     {"id": 8, "title": "P-2026-2316 Let's Encrypt 链接预检", "status": "completed"},
     {"id": 9, "title": "P-2026-2317 统一 12 位密码策略", "status": "completed"},
     {"id": 10, "title": "P-2026-2318 后端漏洞门禁、SBOM 与 CI", "status": "completed"},
-    {"id": 11, "title": "P-2026-2319 生产示例与 Runbook 对齐", "status": "completed"}
+    {"id": 11, "title": "P-2026-2319 生产示例与 Runbook 对齐", "status": "completed"},
+    {"id": 12, "title": "P-2026-2427 恢复前端高危依赖审计门禁", "status": "completed"},
+    {"id": 13, "title": "P-2026-2428 实际课次报名、学生冲突与并发调课一致性", "status": "completed"},
+    {"id": 14, "title": "P-2026-2429 审批及监管列表请求竞态保护", "status": "completed"},
+    {"id": 15, "title": "P-2026-2430 自动监管扫描与运行留痕", "status": "completed"},
+    {"id": 16, "title": "P-2026-2431 长表单未保存输入保护", "status": "completed"},
+    {"id": 17, "title": "P-2026-2433 浏览器、非主路径与真实 MySQL 并发验收", "status": "completed"},
+    {"id": 18, "title": "仓库级 156 后端、61 前端、8 浏览器全量验收", "status": "completed"}
   ]
 }

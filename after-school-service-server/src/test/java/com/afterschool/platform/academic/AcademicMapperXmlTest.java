@@ -111,6 +111,83 @@ class AcademicMapperXmlTest {
                 .containsExactly("sessionId", "schoolId", "now");
     }
 
+    @Test
+    void rescheduleLocksAllActiveEnrollmentStudentsInStableIdOrder()
+            throws Exception {
+        Configuration configuration = mapperConfiguration();
+        MappedStatement statement = configuration.getMappedStatement(
+                AcademicMapper.class.getName() + ".lockActiveEnrollmentStudentIds");
+
+        BoundSql boundSql = statement.getBoundSql(Map.of("offeringId", 40L));
+        String sql = normalize(boundSql);
+
+        assertThat(sql)
+                .contains("FROM student st")
+                .contains("JOIN enrollment e ON e.student_id = st.id")
+                .contains("e.offering_id = ?")
+                .contains("e.status = 'ENROLLED'")
+                .contains("ORDER BY st.id")
+                .endsWith("FOR UPDATE");
+        assertThat(boundSql.getParameterMappings())
+                .extracting(mapping -> mapping.getProperty())
+                .containsExactly("offeringId");
+    }
+
+    @Test
+    void studentConflictComparesActualEffectiveSessionsBeforeNoSessionTemplates()
+            throws Exception {
+        Configuration configuration = mapperConfiguration();
+        MappedStatement statement = configuration.getMappedStatement(
+                AcademicMapper.class.getName() + ".findStudentSessionConflict");
+
+        BoundSql boundSql = statement.getBoundSql(Map.of(
+                "studentId", 10L,
+                "offeringId", 40L,
+                "sessionDate", LocalDate.of(2026, 9, 9),
+                "startTime", java.time.LocalTime.of(15, 0),
+                "endTime", java.time.LocalTime.of(16, 0)));
+        String sql = normalize(boundSql);
+
+        assertThat(sql)
+                .contains("JOIN lesson_session existing_session")
+                .contains("existing_session.status != 'CANCELED'")
+                .contains("existing_session.session_date = ?")
+                .contains("NOT EXISTS")
+                .contains("WEEKDAY(?) + 1")
+                .contains("existing.id != ?")
+                .contains("e.status = 'ENROLLED'")
+                .contains("UNION ALL")
+                .doesNotContain("FOR UPDATE");
+    }
+
+    @Test
+    void revertLocksTheLatestActiveAdjustmentAndUsesAStatusGuard()
+            throws Exception {
+        Configuration configuration = mapperConfiguration();
+        MappedStatement latest = configuration.getMappedStatement(
+                AcademicMapper.class.getName() + ".lockLatestAppliedScheduleAdjustment");
+        BoundSql latestSql = latest.getBoundSql(Map.of("sessionId", 100L, "schoolId", 1L));
+
+        assertThat(normalize(latestSql))
+                .contains("FROM schedule_adjustment")
+                .contains("session_id = ?")
+                .contains("school_id = ?")
+                .contains("status = 'APPLIED'")
+                .contains("ORDER BY id DESC")
+                .contains("LIMIT 1")
+                .endsWith("FOR UPDATE");
+
+        MappedStatement mark = configuration.getMappedStatement(
+                AcademicMapper.class.getName() + ".markScheduleAdjustmentReverted");
+        BoundSql markSql = mark.getBoundSql(Map.of("adjustmentId", 900L, "schoolId", 1L));
+        assertThat(normalize(markSql))
+                .contains("UPDATE schedule_adjustment")
+                .contains("SET status = 'REVERTED'")
+                .contains("id = ?")
+                .contains("school_id = ?")
+                .contains("status = 'APPLIED'");
+    }
+
     private Configuration mapperConfiguration() throws Exception {
         Configuration configuration = new Configuration();
         String resource = "mapper/academic/AcademicMapper.xml";

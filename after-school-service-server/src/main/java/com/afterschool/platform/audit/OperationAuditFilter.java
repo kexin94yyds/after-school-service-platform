@@ -17,6 +17,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.util.ContentCachingResponseWrapper;
@@ -38,6 +39,12 @@ public class OperationAuditFilter extends OncePerRequestFilter {
         this.service = service;
         this.transactionTemplate =
                 new TransactionTemplate(transactionManager);
+        // Mutating API work, including the audit record, runs in one outer
+        // transaction. READ_COMMITTED makes each conflict check see the latest
+        // committed state after a row-lock wait instead of reusing an earlier
+        // REPEATABLE_READ snapshot created by a preliminary lookup.
+        this.transactionTemplate.setIsolationLevel(
+                TransactionDefinition.ISOLATION_READ_COMMITTED);
     }
 
     @Override

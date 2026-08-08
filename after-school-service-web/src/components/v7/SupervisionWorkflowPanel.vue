@@ -12,6 +12,7 @@ import type {
   AlertStatus,
   AlertType,
   ScanResult,
+  SupervisionScanRun,
   SupervisionAction,
   SupervisionAlert,
 } from '@/api/supervision'
@@ -38,6 +39,7 @@ const terms = ref<AcademicTermOption[]>([])
 const loading = ref(false)
 const referenceLoading = ref(false)
 const error = ref('')
+let alertLoadVersion = 0
 
 const filters = reactive<{
   schoolId: number | null
@@ -60,6 +62,11 @@ const scanForm = reactive({
   lowAttendanceThreshold: 0.8,
   deadlineDays: 7,
 })
+const scanRunsVisible = ref(false)
+const scanRunsLoading = ref(false)
+const scanRunsError = ref('')
+const scanRuns = ref<SupervisionScanRun[]>([])
+let scanRunLoadVersion = 0
 
 const transitionVisible = ref(false)
 const transitionLoading = ref(false)
@@ -178,26 +185,31 @@ async function loadReferences(): Promise<void> {
 }
 
 async function loadAlerts(options: { saveQuery?: boolean } = {}): Promise<void> {
+  const requestVersion = ++alertLoadVersion
+  const query = {
+    schoolId: props.mode === 'regulator' ? filters.schoolId : undefined,
+    type: filters.type,
+    status: filters.status,
+    detectedFrom: filters.dateRange?.[0]
+      ? `${filters.dateRange[0]}T00:00:00`
+      : undefined,
+    detectedTo: filters.dateRange?.[1]
+      ? `${filters.dateRange[1]}T23:59:59`
+      : undefined,
+  }
   loading.value = true
   error.value = ''
   try {
     if (options.saveQuery) await saveFiltersToUrl()
-    alerts.value = await supervisionApi.list({
-      schoolId: props.mode === 'regulator' ? filters.schoolId : undefined,
-      type: filters.type,
-      status: filters.status,
-      detectedFrom: filters.dateRange?.[0]
-        ? `${filters.dateRange[0]}T00:00:00`
-        : undefined,
-      detectedTo: filters.dateRange?.[1]
-        ? `${filters.dateRange[1]}T23:59:59`
-        : undefined,
-    })
+    const rows = await supervisionApi.list(query)
+    if (requestVersion === alertLoadVersion) alerts.value = rows
   } catch (loadError) {
-    alerts.value = []
-    error.value = getErrorMessage(loadError, '监管预警加载失败。')
+    if (requestVersion === alertLoadVersion) {
+      alerts.value = []
+      error.value = getErrorMessage(loadError, '监管预警加载失败。')
+    }
   } finally {
-    loading.value = false
+    if (requestVersion === alertLoadVersion) loading.value = false
   }
 }
 
@@ -351,11 +363,55 @@ async function runScan(): Promise<void> {
         : '扫描完成，未发现新预警',
     )
     await loadAlerts()
+    if (scanRunsVisible.value) await loadScanRuns()
   } catch (scanError) {
     ElMessage.error(getErrorMessage(scanError, '监管扫描执行失败。'))
   } finally {
     scanLoading.value = false
   }
+}
+
+async function loadScanRuns(): Promise<void> {
+  const requestVersion = ++scanRunLoadVersion
+  scanRunsLoading.value = true
+  scanRunsError.value = ''
+  try {
+    const rows = await supervisionApi.scanRuns(100)
+    if (requestVersion === scanRunLoadVersion) scanRuns.value = rows
+  } catch (loadError) {
+    if (requestVersion === scanRunLoadVersion) {
+      scanRuns.value = []
+      scanRunsError.value = getErrorMessage(
+        loadError,
+        '扫描运行记录加载失败。',
+      )
+    }
+  } finally {
+    if (requestVersion === scanRunLoadVersion) scanRunsLoading.value = false
+  }
+}
+
+async function openScanRuns(): Promise<void> {
+  scanRunsVisible.value = true
+  await loadScanRuns()
+}
+
+function scanSourceLabel(source: SupervisionScanRun['triggerSource']): string {
+  return source === 'SCHEDULED' ? '定时扫描' : '手工扫描'
+}
+
+function scanOperatorLabel(run: SupervisionScanRun): string {
+  if (run.triggerSource === 'SCHEDULED') return '系统任务'
+  return run.operatorName || '监管账号'
+}
+
+function actorRoleLabel(role: SupervisionAction['actorRole']): string {
+  const labels: Record<SupervisionAction['actorRole'], string> = {
+    REGULATOR: '监管人员',
+    SCHOOL_ADMIN: '学校管理员',
+    SYSTEM: '系统任务',
+  }
+  return labels[role]
 }
 
 function actionLabel(value: string): string {
@@ -386,6 +442,9 @@ onMounted(async () => {
     >
       <template #actions>
         <el-button :loading="loading" @click="loadAlerts()">刷新</el-button>
+        <el-button v-if="mode === 'regulator'" @click="openScanRuns">
+          扫描记录
+        </el-button>
         <el-button v-if="mode === 'regulator'" type="primary" @click="openScan">
           执行扫描
         </el-button>
@@ -605,6 +664,72 @@ onMounted(async () => {
       </template>
     </el-dialog>
 
+    <el-drawer
+      v-model="scanRunsVisible"
+      title="监管扫描运行记录"
+      size="min(760px, 96vw)"
+    >
+      <div class="scan-run-toolbar">
+        <p>保留手工与定时扫描的成功、失败及重入拒绝结果。</p>
+        <el-button :loading="scanRunsLoading" @click="loadScanRuns">
+          刷新记录
+        </el-button>
+      </div>
+      <el-alert
+        v-if="scanRunsError"
+        :title="scanRunsError"
+        type="error"
+        show-icon
+        :closable="false"
+      />
+      <el-table
+        v-loading="scanRunsLoading"
+        :data="scanRuns"
+        row-key="id"
+        table-layout="auto"
+      >
+        <el-table-column label="启动时间" min-width="165">
+          <template #default="{ row }">
+            {{ formatDateTime(row.startedAt) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="来源 / 操作人" min-width="150">
+          <template #default="{ row }">
+            <div class="scan-run-source">
+              <strong>{{ scanSourceLabel(row.triggerSource) }}</strong>
+              <span>{{ scanOperatorLabel(row) }}</span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="90">
+          <template #default="{ row }">
+            <el-tag :type="statusTagType(row.status)" effect="plain">
+              {{ statusLabel(row.status) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="候选 / 新增" min-width="105">
+          <template #default="{ row }">
+            {{ row.candidateCount ?? '-' }} / {{ row.createdCount ?? '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="结束或失败信息" min-width="210">
+          <template #default="{ row }">
+            <div class="scan-run-finish">
+              <span>{{ formatDateTime(row.finishedAt) }}</span>
+              <small v-if="row.failureSummary">{{ row.failureSummary }}</small>
+            </div>
+          </template>
+        </el-table-column>
+        <template #empty>
+          <div class="empty-state large">
+            <strong>暂无扫描运行记录</strong>
+            <span>执行手工扫描或等待定时任务后，运行结果会出现在这里。</span>
+          </div>
+        </template>
+      </el-table>
+    </el-drawer>
+
     <el-dialog
       v-model="transitionVisible"
       :title="transitionAction?.label || '更新预警'"
@@ -681,7 +806,7 @@ onMounted(async () => {
         >
           <div class="history-item">
             <strong>{{ actionLabel(item.actionType) }}</strong>
-            <span>{{ item.actorName }} / {{ item.actorRole === 'REGULATOR' ? '监管人员' : '学校管理员' }}</span>
+            <span>{{ item.actorName }} / {{ actorRoleLabel(item.actorRole) }}</span>
             <p>{{ item.comment }}</p>
             <small>
               {{ item.fromStatus ? statusLabel(item.fromStatus) : '新建' }}
@@ -843,6 +968,40 @@ onMounted(async () => {
 
 .scan-result {
   margin-top: 4px;
+}
+
+.scan-run-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.scan-run-toolbar p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.scan-run-source,
+.scan-run-finish {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.scan-run-source span,
+.scan-run-finish span,
+.scan-run-finish small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.scan-run-finish small {
+  color: var(--workflow-risk);
+  white-space: normal;
 }
 
 .transition-context {

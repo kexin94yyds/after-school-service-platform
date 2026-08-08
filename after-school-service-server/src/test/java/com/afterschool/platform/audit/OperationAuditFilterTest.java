@@ -20,6 +20,7 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 
@@ -77,6 +78,28 @@ class OperationAuditFilterTest {
         assertThat(event.getValue().sourceFingerprint()).hasSize(64);
         assertThat(event.getValue().toString())
                 .doesNotContain("secret", "currentPassword", "newPassword");
+    }
+
+    @Test
+    void startsMutatingApiTransactionsAtReadCommitted()
+            throws Exception {
+        authenticate();
+        MockHttpServletRequest request =
+                new MockHttpServletRequest("POST", "/api/sessions/100/reschedule");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(
+                request,
+                response,
+                (servletRequest, servletResponse) ->
+                        ((HttpServletResponse) servletResponse)
+                                .setStatus(204));
+
+        ArgumentCaptor<TransactionDefinition> definition =
+                ArgumentCaptor.forClass(TransactionDefinition.class);
+        verify(transactionManager).getTransaction(definition.capture());
+        assertThat(definition.getValue().getIsolationLevel())
+                .isEqualTo(TransactionDefinition.ISOLATION_READ_COMMITTED);
     }
 
     @Test

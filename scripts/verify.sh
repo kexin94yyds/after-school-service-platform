@@ -24,11 +24,17 @@ environment_example="${project_root}/.env.example"
 server_port="${AFTER_SCHOOL_VERIFY_SERVER_PORT:-18081}"
 management_port="${AFTER_SCHOOL_VERIFY_MANAGEMENT_PORT:-18082}"
 mysql_port="${AFTER_SCHOOL_VERIFY_MYSQL_PORT:-18306}"
+web_port="${AFTER_SCHOOL_VERIFY_WEB_PORT:-15173}"
 demo_password="${AFTER_SCHOOL_DEMO_PASSWORD:-123456}"
 run_root=""
 mysql_pid=""
 server_pid=""
+web_pid=""
 prod_guard_pid=""
+race_barrier_pid=""
+race_curl_pid_a=""
+race_curl_pid_b=""
+race_barrier_fd_open=false
 nginx_full_active_config=""
 nginx_active_config=""
 delivery_test_root=""
@@ -45,6 +51,9 @@ fail() {
   fi
   if [[ -n "${run_root}" && -f "${run_root}/mysql.log" ]]; then
     tail -80 "${run_root}/mysql.log" >&2 || true
+  fi
+  if [[ -n "${run_root}" && -f "${run_root}/web.log" ]]; then
+    tail -80 "${run_root}/web.log" >&2 || true
   fi
   exit 1
 }
@@ -98,12 +107,29 @@ terminate_pid() {
     "${process_name}" "${pid}" >&2
 }
 
+release_reschedule_race_barrier() {
+  if [[ "${race_barrier_fd_open}" == "true" ]]; then
+    printf '%s\n' 'ROLLBACK;' >&9 || true
+    exec 9>&-
+    race_barrier_fd_open=false
+  fi
+}
+
 cleanup() {
   local mysql_admin_pid=""
   local mysql_admin_attempt=0
 
+  terminate_pid "${race_curl_pid_a}" "first reschedule race request"
+  race_curl_pid_a=""
+  terminate_pid "${race_curl_pid_b}" "second reschedule race request"
+  race_curl_pid_b=""
+  release_reschedule_race_barrier
+  terminate_pid "${race_barrier_pid}" "reschedule race barrier"
+  race_barrier_pid=""
   terminate_pid "${prod_guard_pid}" "prod Flyway guard"
   prod_guard_pid=""
+  terminate_pid "${web_pid}" "frontend preview"
+  web_pid=""
   terminate_pid "${server_pid}" "backend"
   server_pid=""
   if [[ -n "${mysql_pid}" ]] && kill -0 "${mysql_pid}" >/dev/null 2>&1; then
@@ -141,7 +167,7 @@ cleanup() {
 trap cleanup EXIT
 
 for required_command in curl jq lsof mvn rsync sed awk grep ps readlink flock \
-    gzip stat find install; do
+    gzip stat find install mkfifo; do
   command -v "${required_command}" >/dev/null 2>&1 \
     || fail "missing required command: ${required_command}"
 done
@@ -617,7 +643,8 @@ for migration in \
   V6__add_leave_and_attendance_correction_workflows.sql \
   V7__add_supervision_audit_evaluation_and_reporting.sql \
   V9__separate_current_guardian_authorization.sql \
-  V10__preserve_reviewed_leave_withdrawal_history.sql; do
+  V10__preserve_reviewed_leave_withdrawal_history.sql \
+  V12__add_supervision_scan_runs.sql; do
   [[ -f "${migration_dir}/${migration}" ]] || fail "missing migration ${migration}"
 done
 demo_migration="${server_dir}/src/main/resources/db/demo/V4__seed_demo_workflow.sql"
@@ -680,6 +707,7 @@ for jar_entry in \
   "BOOT-INF/classes/db/migration/V7__add_supervision_audit_evaluation_and_reporting.sql" \
   "BOOT-INF/classes/db/migration/V9__separate_current_guardian_authorization.sql" \
   "BOOT-INF/classes/db/migration/V10__preserve_reviewed_leave_withdrawal_history.sql" \
+  "BOOT-INF/classes/db/migration/V12__add_supervision_scan_runs.sql" \
   "BOOT-INF/classes/db/demo/V4__seed_demo_workflow.sql" \
   "BOOT-INF/classes/db/demo/V8__seed_comprehensive_graduation_workflow.sql" \
   "BOOT-INF/classes/db/demo/V11__simplify_demo_login_credentials.sql"; do
@@ -882,7 +910,7 @@ mysql_admin="${mysql_prefix}/bin/mysqladmin"
 [[ -x "${mysql_server}" && -x "${mysql_client}" && -x "${mysql_admin}" ]] \
   || fail "MySQL 8.4 not found at ${mysql_prefix}; install mysql@8.4 or set AFTER_SCHOOL_MYSQL84_HOME"
 
-for port in "${server_port}" "${management_port}" "${mysql_port}"; do
+for port in "${server_port}" "${management_port}" "${mysql_port}" "${web_port}"; do
   if lsof -nP -iTCP:"${port}" -sTCP:LISTEN >/dev/null 2>&1; then
     fail "verification port ${port} is already in use"
   fi
@@ -1053,7 +1081,7 @@ start_server() {
       DB_USERNAME="${db_user}" \
       DB_PASSWORD="${db_password}" \
       SPRINGDOC_ENABLED=false \
-      APP_CORS_ALLOWED_ORIGIN="http://localhost:5173" \
+      APP_CORS_ALLOWED_ORIGIN="http://127.0.0.1:${web_port}" \
       java -jar "${jar_path}"
   ) >"${run_root}/server.log" 2>&1 &
   server_pid="$!"
@@ -1090,7 +1118,7 @@ stop_server() {
   server_pid=""
 }
 
-log_step "Migrating the fresh database through the production-only V10 schema"
+log_step "Migrating the fresh database through the production-only V12 schema"
 
 start_server default false
 production_history="$(
@@ -1104,8 +1132,8 @@ production_history="$(
      FROM flyway_schema_history
      WHERE success = 1"
 )"
-[[ "${production_history}" == "8:0:10" ]] \
-  || fail "default profile did not stop at the production-only V10 schema: ${production_history}"
+[[ "${production_history}" == "9:0:12" ]] \
+  || fail "default profile did not stop at the production-only V12 schema: ${production_history}"
 production_demo_users="$(
   "${mysql_client}" --no-defaults --protocol=socket --socket="${mysql_socket}" \
     -uroot --skip-column-names "${db_name}" -e \
@@ -1116,7 +1144,7 @@ production_demo_users="$(
   || fail "default profile unexpectedly inserted demo accounts"
 stop_server
 
-log_step "Switching the existing V10 schema to the real demo profile"
+log_step "Switching the existing V12 schema to the real demo profile"
 
 start_server
 base_url="http://127.0.0.1:${server_port}/api"
@@ -1128,13 +1156,13 @@ table_count="$(
     -uroot --skip-column-names -e \
     "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${db_name}' AND table_name != 'flyway_schema_history'"
 )"
-[[ "${table_count}" == "25" ]] || fail "expected 25 domain tables, found ${table_count}"
+[[ "${table_count}" == "26" ]] || fail "expected 26 domain tables, found ${table_count}"
 migration_count="$(
   "${mysql_client}" --no-defaults --protocol=socket --socket="${mysql_socket}" \
     -uroot --skip-column-names "${db_name}" -e \
     "SELECT COUNT(*) FROM flyway_schema_history WHERE success = 1"
 )"
-[[ "${migration_count}" == "11" ]] || fail "expected 11 successful Flyway migrations"
+[[ "${migration_count}" == "12" ]] || fail "expected 12 successful Flyway migrations"
 demo_operational_offerings="$(
   "${mysql_client}" --no-defaults --protocol=socket --socket="${mysql_socket}" \
     -uroot --skip-column-names "${db_name}" -e \
@@ -1253,11 +1281,11 @@ csrf_missing_status="$(
 allowed_cors="$(
   curl --noproxy '*' -sS -D - -o /dev/null \
     -X OPTIONS \
-    -H 'Origin: http://localhost:5173' \
+    -H "Origin: http://127.0.0.1:${web_port}" \
     -H 'Access-Control-Request-Method: POST' \
     "${base_url}/auth/logout"
 )"
-grep -Fiq 'Access-Control-Allow-Origin: http://localhost:5173' <<<"${allowed_cors}" \
+grep -Fiq "Access-Control-Allow-Origin: http://127.0.0.1:${web_port}" <<<"${allowed_cors}" \
   || fail "allowed CORS origin was not accepted"
 blocked_cors="$(
   curl --noproxy '*' -sS -D - -o /dev/null \
@@ -1546,6 +1574,271 @@ other_teacher_status="$(
 )"
 [[ "${other_teacher_status}" == "403" ]] || fail "teacher accessed another teacher's sessions"
 
+log_step "Verifying concurrent shared-student reschedule protection"
+
+# The two fixtures deliberately use distinct teachers, offerings and target
+# rooms.  Their only shared mutable resource is student 2, so a rejected
+# request proves the student-conflict path rather than a teacher/room lock.
+race_shared_student_id=2
+race_target_date="$(
+  TZ=Asia/Shanghai "${node_bin_dir}/node" -e '
+    const date = new Date(`${process.argv[1]}T00:00:00`)
+    while (date.getDay() !== 3) {
+      date.setDate(date.getDate() + 1)
+    }
+    const pad = (value) => String(value).padStart(2, "0")
+    process.stdout.write(
+      `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
+    )
+  ' "${rule_start_date}"
+)"
+
+race_room_a_body='{"schoolId":1,"roomCode":"ROOM-VERIFY-RACE-A","roomName":"并发调课验收教室 A","location":"验收楼 201","capacity":20,"status":"ACTIVE"}'
+race_room_b_body='{"schoolId":1,"roomCode":"ROOM-VERIFY-RACE-B","roomName":"并发调课验收教室 B","location":"验收楼 202","capacity":20,"status":"ACTIVE"}'
+write_api 201 POST /rooms "${admin_jar}" "${race_room_a_body}" \
+  "${run_root}/race-room-a.json"
+write_api 201 POST /rooms "${admin_jar}" "${race_room_b_body}" \
+  "${run_root}/race-room-b.json"
+race_room_a_id="$(jq -r '.id // empty' "${run_root}/race-room-a.json")"
+race_room_b_id="$(jq -r '.id // empty' "${run_root}/race-room-b.json")"
+[[ "${race_room_a_id}" =~ ^[0-9]+$ && "${race_room_b_id}" =~ ^[0-9]+$ ]] \
+  || fail "concurrent-reschedule fixtures did not create two rooms"
+
+race_teacher_a_body='{"schoolId":1,"teacherNo":"T-VERIFY-RACE-A","fullName":"并发调课验收教师 A","username":"verify_race_teacher_a","password":"VerifyRaceTeacherA@2026","phone":"13800000911","title":"并发验收教师","status":"ACTIVE"}'
+race_teacher_b_body='{"schoolId":1,"teacherNo":"T-VERIFY-RACE-B","fullName":"并发调课验收教师 B","username":"verify_race_teacher_b","password":"VerifyRaceTeacherB@2026","phone":"13800000912","title":"并发验收教师","status":"ACTIVE"}'
+write_api 201 POST /teachers "${admin_jar}" "${race_teacher_a_body}" \
+  "${run_root}/race-teacher-a.json"
+write_api 201 POST /teachers "${admin_jar}" "${race_teacher_b_body}" \
+  "${run_root}/race-teacher-b.json"
+race_teacher_a_id="$(jq -r '.id // empty' "${run_root}/race-teacher-a.json")"
+race_teacher_b_id="$(jq -r '.id // empty' "${run_root}/race-teacher-b.json")"
+[[ "${race_teacher_a_id}" =~ ^[0-9]+$ && "${race_teacher_b_id}" =~ ^[0-9]+$ ]] \
+  || fail "concurrent-reschedule fixtures did not create two teachers"
+
+create_offering O-VERIFY-RACE-A "${race_teacher_a_id}" 1 "${course_id}" 20 \
+  "${rule_enrollment_start}" "${rule_enrollment_end}" \
+  "${run_root}/race-offering-a.json"
+create_offering O-VERIFY-RACE-B "${race_teacher_b_id}" 2 "${course_id}" 20 \
+  "${rule_enrollment_start}" "${rule_enrollment_end}" \
+  "${run_root}/race-offering-b.json"
+race_offering_a_id="$(jq -r '.id // empty' "${run_root}/race-offering-a.json")"
+race_offering_b_id="$(jq -r '.id // empty' "${run_root}/race-offering-b.json")"
+[[ "${race_offering_a_id}" =~ ^[0-9]+$ && "${race_offering_b_id}" =~ ^[0-9]+$ ]] \
+  || fail "concurrent-reschedule fixtures did not create two offerings"
+
+for race_offering_id in "${race_offering_a_id}" "${race_offering_b_id}"; do
+  race_enrollment_body="$(
+    jq -nc \
+      --argjson studentId "${race_shared_student_id}" \
+      --argjson offeringId "${race_offering_id}" \
+      '{studentId:$studentId,offeringId:$offeringId}'
+  )"
+  write_api 201 POST /enrollments "${parent_jar}" "${race_enrollment_body}" \
+    "${run_root}/race-enrollment-${race_offering_id}.json"
+done
+
+race_teacher_a_jar="${run_root}/race-teacher-a.cookies"
+race_teacher_b_jar="${run_root}/race-teacher-b.cookies"
+login_as verify_race_teacher_a TEACHER "${race_teacher_a_jar}" "VerifyRaceTeacherA@2026"
+login_as verify_race_teacher_b TEACHER "${race_teacher_b_jar}" "VerifyRaceTeacherB@2026"
+write_api 200 POST "/offerings/${race_offering_a_id}/sessions/generate" \
+  "${race_teacher_a_jar}" '{}' "${run_root}/race-sessions-a.json"
+write_api 200 POST "/offerings/${race_offering_b_id}/sessions/generate" \
+  "${race_teacher_b_jar}" '{}' "${run_root}/race-sessions-b.json"
+race_session_a_id="$(jq -r '.[0].id // empty' "${run_root}/race-sessions-a.json")"
+race_session_b_id="$(jq -r '.[0].id // empty' "${run_root}/race-sessions-b.json")"
+[[ "${race_session_a_id}" =~ ^[0-9]+$ && "${race_session_b_id}" =~ ^[0-9]+$ ]] \
+  || fail "concurrent-reschedule fixtures did not generate two sessions"
+
+race_preexisting_target_conflicts="$(
+  "${mysql_client}" --no-defaults --protocol=socket --socket="${mysql_socket}" \
+    -uroot --skip-column-names "${db_name}" -e \
+    "SELECT COUNT(*)
+     FROM enrollment e
+     JOIN course_offering o ON o.id = e.offering_id
+     JOIN lesson_session ls ON ls.offering_id = o.id
+     WHERE e.student_id = ${race_shared_student_id}
+       AND e.status = 'ENROLLED'
+       AND o.status NOT IN ('CANCELED', 'FINISHED')
+       AND ls.status != 'CANCELED'
+       AND ls.session_date = '${race_target_date}'
+       AND ls.start_time < '21:00:00'
+       AND ls.end_time > '20:00:00'"
+)"
+[[ "${race_preexisting_target_conflicts}" == "0" ]] \
+  || fail "concurrent-reschedule target already conflicts before the race"
+
+# The mutation contract deliberately uses READ_COMMITTED: hold student 2 in a
+# separate MySQL transaction and wait until performance_schema observes two
+# HTTP requests blocked on that exact row.  Releasing it only then proves that
+# the second transaction re-reads the first committed schedule before checking
+# student conflicts, without relying on a scheduling sleep.
+race_barrier_fifo="${run_root}/reschedule-race-barrier.sql"
+race_barrier_output="${run_root}/reschedule-race-barrier.out"
+race_barrier_error="${run_root}/reschedule-race-barrier.err"
+mkfifo "${race_barrier_fifo}"
+"${mysql_client}" --no-defaults --protocol=socket --socket="${mysql_socket}" \
+  -uroot --batch --raw --skip-column-names --unbuffered "${db_name}" \
+  <"${race_barrier_fifo}" >"${race_barrier_output}" 2>"${race_barrier_error}" &
+race_barrier_pid="$!"
+exec 9>"${race_barrier_fifo}"
+race_barrier_fd_open=true
+printf '%s\n' \
+  "SELECT CONCAT('RACE_BARRIER_CONNECTION:', CONNECTION_ID());" \
+  'SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ;' \
+  'START TRANSACTION;' \
+  "SELECT id FROM student WHERE id = ${race_shared_student_id} FOR UPDATE;" \
+  "SELECT 'RACE_BARRIER_LOCKED';" >&9
+
+race_barrier_ready=false
+race_barrier_connection_id=""
+for _ in {1..100}; do
+  race_barrier_connection_id="$(
+    sed -n 's/^RACE_BARRIER_CONNECTION://p' "${race_barrier_output}" | sed -n '1p'
+  )"
+  if [[ "${race_barrier_connection_id}" =~ ^[0-9]+$ ]] \
+      && grep -Fxq 'RACE_BARRIER_LOCKED' "${race_barrier_output}"; then
+    race_barrier_ready=true
+    break
+  fi
+  if ! kill -0 "${race_barrier_pid}" >/dev/null 2>&1; then
+    cat "${race_barrier_error}" >&2 || true
+    fail "reschedule race barrier transaction exited before acquiring student lock"
+  fi
+  sleep 0.05
+done
+[[ "${race_barrier_ready}" == "true" ]] \
+  || fail "reschedule race barrier did not acquire the student lock"
+
+race_token="$(csrf_for "${admin_jar}")"
+race_body_a="$(
+  jq -nc \
+    --arg sessionDate "${race_target_date}" \
+    --argjson roomId "${race_room_a_id}" \
+    '{sessionDate:$sessionDate,startTime:"20:00:00",endTime:"21:00:00",roomId:$roomId,reason:"并发验收调课 A"}'
+)"
+race_body_b="$(
+  jq -nc \
+    --arg sessionDate "${race_target_date}" \
+    --argjson roomId "${race_room_b_id}" \
+    '{sessionDate:$sessionDate,startTime:"20:00:00",endTime:"21:00:00",roomId:$roomId,reason:"并发验收调课 B"}'
+)"
+(
+  exec curl --noproxy '*' -sS --max-time 20 \
+    -o "${run_root}/reschedule-race-a.json" -w '%{http_code}' \
+    -b "${admin_jar}" \
+    -X POST -H 'Content-Type: application/json' \
+    -H "X-XSRF-TOKEN: ${race_token}" \
+    --data-binary "${race_body_a}" \
+    "${base_url}/sessions/${race_session_a_id}/reschedule"
+) >"${run_root}/reschedule-race-a.status" &
+race_curl_pid_a="$!"
+(
+  exec curl --noproxy '*' -sS --max-time 20 \
+    -o "${run_root}/reschedule-race-b.json" -w '%{http_code}' \
+    -b "${admin_jar}" \
+    -X POST -H 'Content-Type: application/json' \
+    -H "X-XSRF-TOKEN: ${race_token}" \
+    --data-binary "${race_body_b}" \
+    "${base_url}/sessions/${race_session_b_id}/reschedule"
+) >"${run_root}/reschedule-race-b.status" &
+race_curl_pid_b="$!"
+
+race_waiters_ready=false
+race_waiter_count=0
+for _ in {1..200}; do
+  race_waiter_count="$(
+    "${mysql_client}" --no-defaults --protocol=socket --socket="${mysql_socket}" \
+      -uroot --skip-column-names -e \
+      "SELECT COUNT(DISTINCT waits.REQUESTING_ENGINE_TRANSACTION_ID)
+       FROM performance_schema.data_lock_waits waits
+       JOIN performance_schema.data_locks blocker
+         ON blocker.ENGINE = waits.ENGINE
+        AND blocker.ENGINE_LOCK_ID = waits.BLOCKING_ENGINE_LOCK_ID
+       JOIN performance_schema.threads blocker_thread
+         ON blocker_thread.THREAD_ID = blocker.THREAD_ID
+       WHERE blocker_thread.PROCESSLIST_ID = ${race_barrier_connection_id}
+         AND blocker.OBJECT_SCHEMA = '${db_name}'
+         AND blocker.OBJECT_NAME = 'student'
+         AND blocker.INDEX_NAME = 'PRIMARY'
+         AND blocker.LOCK_DATA = '${race_shared_student_id}'"
+  )"
+  if [[ "${race_waiter_count}" == "2" ]]; then
+    race_waiters_ready=true
+    break
+  fi
+  if ! kill -0 "${race_curl_pid_a}" >/dev/null 2>&1 \
+      || ! kill -0 "${race_curl_pid_b}" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.05
+done
+if [[ "${race_waiters_ready}" != "true" ]]; then
+  fail "reschedule race never reached two observed waits on the shared student lock (saw ${race_waiter_count})"
+fi
+
+printf '%s\n' 'COMMIT;' >&9
+exec 9>&-
+race_barrier_fd_open=false
+if ! wait "${race_barrier_pid}"; then
+  cat "${race_barrier_error}" >&2 || true
+  fail "reschedule race barrier transaction did not commit cleanly"
+fi
+race_barrier_pid=""
+if ! wait "${race_curl_pid_a}"; then
+  fail "first reschedule race HTTP request failed"
+fi
+race_curl_pid_a=""
+if ! wait "${race_curl_pid_b}"; then
+  fail "second reschedule race HTTP request failed"
+fi
+race_curl_pid_b=""
+race_statuses="$(
+  {
+    cat "${run_root}/reschedule-race-a.status"
+    printf '\n'
+    cat "${run_root}/reschedule-race-b.status"
+    printf '\n'
+  } | sort | tr '\n' ' '
+)"
+[[ "${race_statuses}" == "201 409 " ]] \
+  || fail "shared-student concurrent reschedules must yield one 201 and one 409, got ${race_statuses}"
+if [[ "$(cat "${run_root}/reschedule-race-a.status")" == "409" ]]; then
+  race_conflict_output="${run_root}/reschedule-race-a.json"
+  race_success_output="${run_root}/reschedule-race-b.json"
+else
+  race_conflict_output="${run_root}/reschedule-race-b.json"
+  race_success_output="${run_root}/reschedule-race-a.json"
+fi
+jq -e '.code == "STUDENT_SCHEDULE_CONFLICT"' "${race_conflict_output}" >/dev/null \
+  || fail "concurrent reschedule rejection did not use STUDENT_SCHEDULE_CONFLICT"
+jq -e --arg targetDate "${race_target_date}" \
+  '.status == "APPLIED"
+   and (.adjustedSessionDate | tostring | startswith($targetDate))' \
+  "${race_success_output}" >/dev/null \
+  || fail "concurrent reschedule success did not apply the target schedule"
+race_committed_target_count="$(
+  "${mysql_client}" --no-defaults --protocol=socket --socket="${mysql_socket}" \
+    -uroot --skip-column-names "${db_name}" -e \
+    "SELECT COUNT(*)
+     FROM lesson_session
+     WHERE id IN (${race_session_a_id}, ${race_session_b_id})
+       AND session_date = '${race_target_date}'
+       AND start_time = '20:00:00'
+       AND end_time = '21:00:00'"
+)"
+race_applied_adjustment_count="$(
+  "${mysql_client}" --no-defaults --protocol=socket --socket="${mysql_socket}" \
+    -uroot --skip-column-names "${db_name}" -e \
+    "SELECT COUNT(*)
+     FROM schedule_adjustment
+     WHERE session_id IN (${race_session_a_id}, ${race_session_b_id})
+       AND status = 'APPLIED'"
+)"
+[[ "${race_committed_target_count}" == "1" \
+    && "${race_applied_adjustment_count}" == "1" ]] \
+  || fail "concurrent reschedule persisted an invalid target state"
+
 write_api 200 POST "/offerings/${attendance_offering_id}/sessions/generate" \
   "${teacher_jar}" '{}' \
   "${run_root}/sessions.json"
@@ -1704,6 +1997,13 @@ room_body='{"schoolId":1,"roomCode":"ROOM-VERIFY-2098","roomName":"验收综合�
 write_api 201 POST /rooms "${admin_jar}" "${room_body}" \
   "${run_root}/academic-room.json"
 verify_room_id="$(jq -r '.id' "${run_root}/academic-room.json")"
+room_update_body='{"schoolId":1,"roomCode":"ROOM-VERIFY-2098","roomName":"验收综合教室","location":"验收楼 102","capacity":30,"status":"ACTIVE"}'
+write_api 200 PUT "/rooms/${verify_room_id}" "${admin_jar}" "${room_update_body}" \
+  "${run_root}/academic-room-updated.json"
+jq -e --argjson roomId "${verify_room_id}" \
+  '.id == $roomId and .location == "验收楼 102" and .status == "ACTIVE"' \
+  "${run_root}/academic-room-updated.json" >/dev/null \
+  || fail "school admin could not update the academic room"
 
 calendar_body="$(
   jq -nc --argjson termId "${verify_term_id}" \
@@ -1798,6 +2098,9 @@ jq -e '
 ' \
   "${run_root}/rescheduled-session.json" >/dev/null \
   || fail "session reschedule was not applied or audited: $(cat "${run_root}/rescheduled-session.json")"
+reschedule_adjustment_id="$(jq -r '.id // empty' "${run_root}/rescheduled-session.json")"
+[[ "${reschedule_adjustment_id}" =~ ^[0-9]+$ ]] \
+  || fail "session reschedule returned no schedule-adjustment id"
 
 write_api 200 POST "/offerings/${planned_offering_id}/sessions/generate" \
   "${teacher_jar}" '{}' "${run_root}/planned-sessions-regenerated.json"
@@ -1807,6 +2110,63 @@ jq -e \
    and all(.[]; (.sessionDate | tostring | startswith($originalDate) | not))' \
   "${run_root}/planned-sessions-regenerated.json" >/dev/null \
   || fail "session regeneration recreated the original date of an applied reschedule"
+
+write_api 403 POST "/schedule-adjustments/${reschedule_adjustment_id}/revert" \
+  "${teacher_jar}" '{}' "${run_root}/rescheduled-session-revert-teacher-forbidden.json"
+write_api 403 POST "/schedule-adjustments/${reschedule_adjustment_id}/revert" \
+  "${regulator_jar}" '{}' "${run_root}/rescheduled-session-revert-regulator-forbidden.json"
+
+write_api 200 POST "/schedule-adjustments/${reschedule_adjustment_id}/revert" \
+  "${admin_jar}" '{}' "${run_root}/rescheduled-session-reverted.json"
+jq -e --arg originalDate "${reschedule_original_date}" \
+  '.status == "REVERTED"
+   and (.originalSessionDate | tostring | startswith($originalDate))' \
+  "${run_root}/rescheduled-session-reverted.json" >/dev/null \
+  || fail "schedule adjustment was not reverted to its original date"
+reverted_sessions_status="$(
+  status_of "${run_root}/planned-sessions-after-revert.json" \
+    -c "${teacher_jar}" -b "${teacher_jar}" \
+    "${base_url}/offerings/${planned_offering_id}/sessions"
+)"
+[[ "${reverted_sessions_status}" == "200" ]] \
+  || fail "teacher could not reload sessions after schedule-adjustment revert"
+jq -e --argjson sessionId "${reschedule_session_id}" \
+  --arg originalDate "${reschedule_original_date}" \
+  'any(.[]; .id == $sessionId
+       and (.sessionDate | tostring | startswith($originalDate)))' \
+  "${run_root}/planned-sessions-after-revert.json" >/dev/null \
+  || fail "schedule-adjustment revert did not restore the session original date"
+write_api 409 POST "/schedule-adjustments/${reschedule_adjustment_id}/revert" \
+  "${admin_jar}" '{}' "${run_root}/rescheduled-session-revert-duplicate.json"
+jq -e '.code == "SCHEDULE_ADJUSTMENT_NOT_ACTIVE"' \
+  "${run_root}/rescheduled-session-revert-duplicate.json" >/dev/null \
+  || fail "reverting an already reverted schedule adjustment was not rejected"
+
+session_update_body='{"status":"SCHEDULED","notes":"验收课次备注已更新"}'
+write_api 200 PUT "/sessions/${reschedule_session_id}" "${teacher_jar}" \
+  "${session_update_body}" "${run_root}/planned-session-updated.json"
+jq -e --argjson sessionId "${reschedule_session_id}" \
+  '.id == $sessionId and .status == "SCHEDULED"
+   and .notes == "验收课次备注已更新"' \
+  "${run_root}/planned-session-updated.json" >/dev/null \
+  || fail "teacher could not update a scheduled session status and notes"
+
+withdraw_leave_body="$(
+  jq -nc --argjson sessionId "${reschedule_session_id}" \
+    '{sessionId:$sessionId,studentId:2,reason:"验收请假撤回申请"}'
+)"
+write_api 200 POST /leave-requests "${parent_jar}" "${withdraw_leave_body}" \
+  "${run_root}/leave-withdraw-request.json"
+withdraw_leave_request_id="$(jq -r '.id // empty' "${run_root}/leave-withdraw-request.json")"
+[[ "${withdraw_leave_request_id}" =~ ^[0-9]+$ ]] \
+  || fail "withdrawable leave request returned no id"
+jq -e '.status == "PENDING"' "${run_root}/leave-withdraw-request.json" >/dev/null \
+  || fail "guardian leave request was not pending before withdrawal"
+write_api 200 POST "/leave-requests/${withdraw_leave_request_id}/withdraw" \
+  "${parent_jar}" '{}' "${run_root}/leave-withdrawn.json"
+jq -e '.status == "WITHDRAWN" and .withdrawnByName != null' \
+  "${run_root}/leave-withdrawn.json" >/dev/null \
+  || fail "guardian could not withdraw a pending leave request"
 
 leave_body="$(
   jq -nc --argjson sessionId "${planned_session_id}" \
@@ -1835,6 +2195,31 @@ jq -e \
 
 correction_attendance_id="$(jq -r '.[0].id' "${run_root}/attendance-saved.json")"
 correction_student_id="$(jq -r '.[0].studentId' "${run_root}/attendance-saved.json")"
+canceled_correction_body="$(
+  jq -nc \
+    --argjson sessionId "${session_id}" \
+    --argjson studentId "${correction_student_id}" \
+    '{
+      sessionId:$sessionId,
+      studentId:$studentId,
+      requestedStatus:"ABSENT",
+      requestedRemark:"待撤销的验收纠错",
+      reason:"验收取消待审批考勤纠错"
+    }'
+)"
+write_api 200 POST /attendance-corrections "${teacher_jar}" \
+  "${canceled_correction_body}" "${run_root}/correction-cancel-request.json"
+canceled_correction_request_id="$(jq -r '.id // empty' "${run_root}/correction-cancel-request.json")"
+[[ "${canceled_correction_request_id}" =~ ^[0-9]+$ ]] \
+  || fail "cancelable attendance correction returned no id"
+jq -e '.status == "PENDING"' "${run_root}/correction-cancel-request.json" >/dev/null \
+  || fail "attendance correction was not pending before cancellation"
+write_api 200 POST "/attendance-corrections/${canceled_correction_request_id}/cancel" \
+  "${teacher_jar}" '{}' "${run_root}/correction-canceled.json"
+jq -e '.status == "CANCELED" and .canceledByName != null' \
+  "${run_root}/correction-canceled.json" >/dev/null \
+  || fail "teacher could not cancel a pending attendance correction"
+
 correction_body="$(
   jq -nc \
     --argjson sessionId "${session_id}" \
@@ -1948,6 +2333,37 @@ jq -e \
   "${run_root}/evaluation-list.json" >/dev/null \
   || fail "regulator evaluation projection leaked personal details"
 
+evaluation_summary_status="$(
+  status_of "${run_root}/evaluation-summary.json" \
+    -c "${regulator_jar}" -b "${regulator_jar}" \
+    "${base_url}/evaluations/summary?schoolId=1"
+)"
+[[ "${evaluation_summary_status}" == "200" ]] \
+  || fail "regulator evaluation summary failed"
+jq -e '
+  .evaluationCount >= 2
+  and .rating5Count >= 1
+  and .averageRating >= 1 and .averageRating <= 5
+  and .satisfactionRate >= 0 and .satisfactionRate <= 100
+' "${run_root}/evaluation-summary.json" >/dev/null \
+  || fail "evaluation summary returned inconsistent aggregates"
+
+teacher_hours_status="$(
+  status_of "${run_root}/teacher-hours.json" \
+    -c "${regulator_jar}" -b "${regulator_jar}" \
+    "${base_url}/reports/teacher-hours?schoolId=1"
+)"
+[[ "${teacher_hours_status}" == "200" ]] \
+  || fail "regulator teacher-hours report failed"
+jq -e '
+  length > 0
+  and any(.[];
+    .teacherId == 1
+    and .completedSessions >= 1
+    and .completedHours >= 1)
+' "${run_root}/teacher-hours.json" >/dev/null \
+  || fail "teacher-hours report did not include the completed acceptance session"
+
 write_api 200 POST /supervision/alerts/scan "${regulator_jar}" \
   '{"schoolId":1,"lowAttendanceThreshold":0.8,"deadlineDays":7}' \
   "${run_root}/supervision-scan.json"
@@ -1956,6 +2372,30 @@ jq -e \
    and .deduplicatedCount >= 1' \
   "${run_root}/supervision-scan.json" >/dev/null \
   || fail "supervision scan or active-alert deduplication failed"
+supervision_scan_run_id="$(jq -r '.scanRunId // empty' "${run_root}/supervision-scan.json")"
+[[ -n "${supervision_scan_run_id}" ]] \
+  || fail "manual supervision scan returned no scan-run id"
+scan_runs_status="$(
+  status_of "${run_root}/supervision-scan-runs.json" \
+    -c "${regulator_jar}" -b "${regulator_jar}" \
+    "${base_url}/supervision/alerts/scan-runs?limit=10"
+)"
+[[ "${scan_runs_status}" == "200" ]] \
+  || fail "regulator could not list supervision scan runs"
+jq -e --arg scanRunId "${supervision_scan_run_id}" \
+  'any(.[]; .id == $scanRunId
+       and .triggerSource == "MANUAL"
+       and .status == "SUCCESS"
+       and .finishedAt != null)' \
+  "${run_root}/supervision-scan-runs.json" >/dev/null \
+  || fail "manual supervision scan run was not recorded as successful"
+scan_runs_admin_status="$(
+  status_of "${run_root}/supervision-scan-runs-school-admin.json" \
+    -c "${admin_jar}" -b "${admin_jar}" \
+    "${base_url}/supervision/alerts/scan-runs?limit=10"
+)"
+[[ "${scan_runs_admin_status}" == "403" ]] \
+  || fail "school admin could access regulator-only supervision scan runs"
 waiting_alerts_status="$(
   status_of "${run_root}/waiting-supervision-alerts.json" \
     -c "${regulator_jar}" -b "${regulator_jar}" \
@@ -2137,6 +2577,42 @@ after_logout_status="$(
 )"
 [[ "${after_logout_status}" == "401" ]] || fail "session remained valid after logout"
 
+log_step "Running four-role desktop and mobile browser E2E"
+
+(
+  cd "${web_dir}"
+  exec env \
+    VITE_API_PROXY_TARGET="http://127.0.0.1:${server_port}" \
+    PATH="${node_bin_dir}:${PATH}" \
+    npm run preview -- --host 127.0.0.1 --port "${web_port}"
+) >"${run_root}/web.log" 2>&1 &
+web_pid="$!"
+
+web_ready=false
+for _ in {1..40}; do
+  if ! kill -0 "${web_pid}" >/dev/null 2>&1; then
+    fail "frontend preview exited before browser E2E"
+  fi
+  if curl --noproxy '*' --fail --silent --show-error --max-time 2 \
+      "http://127.0.0.1:${web_port}/login" >/dev/null 2>&1; then
+    web_ready=true
+    break
+  fi
+  sleep 0.25
+done
+[[ "${web_ready}" == "true" ]] || fail "frontend preview did not become ready"
+
+(
+  cd "${web_dir}"
+  E2E_BASE_URL="http://127.0.0.1:${web_port}" \
+  E2E_DEMO_PASSWORD="${demo_password}" \
+  PATH="${node_bin_dir}:${PATH}" \
+    npm run test:e2e
+) || fail "Playwright browser E2E failed"
+
+terminate_pid "${web_pid}" "frontend preview"
+web_pid=""
+
 log_step "Checking database invariants and expired-demo re-anchoring"
 
 inconsistent_counts="$(
@@ -2190,7 +2666,7 @@ migration_count_after_restart="$(
     -uroot --skip-column-names "${db_name}" -e \
     "SELECT COUNT(*) FROM flyway_schema_history WHERE success = 1"
 )"
-[[ "${migration_count_after_restart}" == "11" ]] \
+[[ "${migration_count_after_restart}" == "12" ]] \
   || fail "Flyway restart was not idempotent"
 refreshed_timeline_invariants="$(
   "${mysql_client}" --no-defaults --protocol=socket --socket="${mysql_socket}" \
@@ -2485,8 +2961,8 @@ stop_server
 
 printf "\n[verify] SUCCESS\n"
 printf "[verify] Backend: %s automated tests + executable JAR + CycloneDX SBOM passed\n" "${test_count}"
-printf "[verify] Frontend: Vitest + typecheck + production build + audit passed\n"
-printf "[verify] Database: MySQL %s default V10 -> demo V4/V8/V11 + guarded re-anchor/restart/closed-term preservation passed\n" "${mysql_version}"
+printf "[verify] Frontend: Vitest + typecheck + production build + audit + desktop/mobile Playwright passed\n"
+printf "[verify] Database: MySQL %s default V12 -> demo V4/V8/V11 + guarded re-anchor/restart/closed-term preservation passed\n" "${mysql_version}"
 printf "[verify] E2E: auth/RBAC/CRUD/planning/enrollment/leave/teaching/correction/supervision/evaluation/audit/reports passed\n"
 printf "[verify] Operations: atomic frontend/backend rollback + encrypted backup/restore + backup-service-aware health transitions passed\n"
 printf "[verify] Supply chain: CI + OWASP high-severity gate + SBOM contracts passed\n"

@@ -49,7 +49,13 @@ public class EnrollmentService {
             boolean conflict = mapper.countScheduleConflicts(studentId, offeringId) > 0;
             Map<String, Object> item = new LinkedHashMap<>(source);
             try {
-                rules.validate(student, offering, state, conflict, LocalDateTime.now(clock));
+                rules.validate(
+                        student,
+                        offering,
+                        state,
+                        conflict,
+                        effectiveFirstSessionStart(offering),
+                        LocalDateTime.now(clock));
                 item.put("canEnroll", true);
                 item.put("eligibilityCode", "ELIGIBLE");
                 item.put("eligibilityMessage", "可报名");
@@ -76,22 +82,30 @@ public class EnrollmentService {
     public Map<String, Object> enroll(EnrollmentController.EnrollmentRequest request) {
         long guardianId = requireGuardianId();
 
-        // Fixed lock order: student first, then offering. This serializes conflict checks
-        // for the same child and capacity checks for the same offering.
-        EnrollmentStudent student = mapper.lockGuardianStudent(request.studentId(), guardianId);
-        if (student == null) {
-            throw ApiException.notFound("学生不存在或未与当前家长绑定");
-        }
+        // Fixed lock order: offering first, then student. Rescheduling follows the
+        // same order before it locks every enrolled student, so enrollment and
+        // schedule mutations cannot validate different versions of one child’s
+        // timetable concurrently.
         EnrollmentOffering offering = mapper.lockOffering(request.offeringId());
         if (offering == null) {
             throw ApiException.notFound("开班不存在");
+        }
+        EnrollmentStudent student = mapper.lockGuardianStudent(request.studentId(), guardianId);
+        if (student == null) {
+            throw ApiException.notFound("学生不存在或未与当前家长绑定");
         }
 
         EnrollmentState existing =
                 mapper.findEnrollmentState(request.offeringId(), request.studentId());
         boolean conflict =
                 mapper.countScheduleConflicts(request.studentId(), request.offeringId()) > 0;
-        rules.validate(student, offering, existing, conflict, LocalDateTime.now(clock));
+        rules.validate(
+                student,
+                offering,
+                existing,
+                conflict,
+                effectiveFirstSessionStart(offering),
+                LocalDateTime.now(clock));
 
         if (mapper.incrementCapacity(request.offeringId()) != 1) {
             throw ApiException.conflict("OFFERING_FULL", "该开班名额已满");
@@ -127,6 +141,12 @@ public class EnrollmentService {
             throw ApiException.notFound("报名记录不存在");
         }
 
+        // Keep cancellation on the same offering -> student lock order as
+        // enrollment and rescheduling.
+        EnrollmentOffering offering = mapper.lockOffering(record.getOfferingId());
+        if (offering == null) {
+            throw ApiException.notFound("开班不存在");
+        }
         if (guardianCancellation) {
             EnrollmentStudent student =
                     mapper.lockGuardianStudent(record.getStudentId(), guardianId);
@@ -137,10 +157,6 @@ public class EnrollmentService {
                         record.getStudentId(), principal.schoolId())
                 == null) {
             throw ApiException.notFound("报名学生不存在或不在当前学校");
-        }
-        EnrollmentOffering offering = mapper.lockOffering(record.getOfferingId());
-        if (offering == null) {
-            throw ApiException.notFound("开班不存在");
         }
         EnrollmentRecord lockedRecord = guardianCancellation
                 ? mapper.lockScopedEnrollment(enrollmentId, guardianId)
@@ -153,7 +169,10 @@ public class EnrollmentService {
                     "报名归属或关联对象已变化，请刷新后重试");
         }
         if (guardianCancellation) {
-            rules.validateCancellation(offering, LocalDateTime.now(clock));
+            rules.validateCancellation(
+                    offering,
+                    effectiveFirstSessionStart(offering),
+                    LocalDateTime.now(clock));
         }
         if (!"ENROLLED".equals(lockedRecord.getStatus())) {
             throw ApiException.conflict("ALREADY_CANCELED", "该报名已经取消");
@@ -200,5 +219,12 @@ public class EnrollmentService {
             throw ApiException.forbidden("当前账号不是有效家长账号");
         }
         return principal.guardianId();
+    }
+
+    private LocalDateTime effectiveFirstSessionStart(EnrollmentOffering offering) {
+        LocalDateTime actualStart = mapper.findFirstValidSessionStart(offering.getId());
+        return actualStart == null
+                ? rules.templateFirstSessionStart(offering)
+                : actualStart;
     }
 }

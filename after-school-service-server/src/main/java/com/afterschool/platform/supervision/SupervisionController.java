@@ -45,6 +45,13 @@ public class SupervisionController {
                 effective.deadlineDays());
     }
 
+    @GetMapping("/scan-runs")
+    @PreAuthorize("hasRole('REGULATOR')")
+    List<Map<String, Object>> scanRuns(
+            @RequestParam(required = false) Integer limit) {
+        return service.listScanRuns(limit);
+    }
+
     @GetMapping
     List<Map<String, Object>> alerts(
             @RequestParam(required = false) Long schoolId,

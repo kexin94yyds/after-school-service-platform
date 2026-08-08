@@ -49,6 +49,8 @@ const revisionError = ref('')
 const revisions = ref<AttendanceRevision[]>([])
 const revisionSubject = ref('')
 let initialized = false
+let leaveLoadVersion = 0
+let correctionLoadVersion = 0
 
 const filteredLeaves = computed(() => {
   const search = keyword.value.trim().toLocaleLowerCase()
@@ -163,32 +165,46 @@ async function loadOfferings(): Promise<boolean> {
 }
 
 async function loadLeaves(): Promise<void> {
+  const requestVersion = ++leaveLoadVersion
+  const offeringId = selectedOfferingId.value || undefined
+  const status = leaveStatusFilter.value || undefined
   leaveLoading.value = true
   error.value = ''
   try {
-    leaveRequests.value = await leaveCorrectionApi.getLeaveRequests({
-      offeringId: selectedOfferingId.value || undefined,
-      status: leaveStatusFilter.value || undefined,
+    const rows = await leaveCorrectionApi.getLeaveRequests({
+      offeringId,
+      status,
     })
+    if (requestVersion === leaveLoadVersion) leaveRequests.value = rows
   } catch (loadError) {
-    error.value = getErrorMessage(loadError, '本校请假申请加载失败。')
+    if (requestVersion === leaveLoadVersion) {
+      error.value = getErrorMessage(loadError, '本校请假申请加载失败。')
+    }
   } finally {
-    leaveLoading.value = false
+    if (requestVersion === leaveLoadVersion) leaveLoading.value = false
   }
 }
 
 async function loadCorrections(): Promise<void> {
+  const requestVersion = ++correctionLoadVersion
+  const offeringId = selectedOfferingId.value || undefined
+  const status = correctionStatusFilter.value || undefined
   correctionLoading.value = true
   error.value = ''
   try {
-    corrections.value = await leaveCorrectionApi.getCorrections({
-      offeringId: selectedOfferingId.value || undefined,
-      status: correctionStatusFilter.value || undefined,
+    const rows = await leaveCorrectionApi.getCorrections({
+      offeringId,
+      status,
     })
+    if (requestVersion === correctionLoadVersion) corrections.value = rows
   } catch (loadError) {
-    error.value = getErrorMessage(loadError, '本校纠错申请加载失败。')
+    if (requestVersion === correctionLoadVersion) {
+      error.value = getErrorMessage(loadError, '本校纠错申请加载失败。')
+    }
   } finally {
-    correctionLoading.value = false
+    if (requestVersion === correctionLoadVersion) {
+      correctionLoading.value = false
+    }
   }
 }
 

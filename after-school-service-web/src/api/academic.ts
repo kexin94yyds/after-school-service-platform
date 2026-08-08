@@ -328,4 +328,12 @@ export const academicApi = {
     )
     return response.data
   },
+  async revertScheduleAdjustment(
+    adjustmentId: number,
+  ): Promise<ScheduleAdjustment> {
+    const response = await http.post<ScheduleAdjustment>(
+      `/schedule-adjustments/${adjustmentId}/revert`,
+    )
+    return response.data
+  },
 }

@@ -38,11 +38,18 @@ jobs:
       - name: Install verification tools
         run: brew install mysql@8.4 jq
 
+      - name: Install Chromium for browser E2E
+        working-directory: after-school-service-web
+        run: |
+          npm ci --prefer-offline --no-audit --no-fund
+          npx playwright install chromium
+
       - name: Run full isolated verification
         env:
           AFTER_SCHOOL_VERIFY_SERVER_PORT: "18083"
           AFTER_SCHOOL_VERIFY_MANAGEMENT_PORT: "18084"
           AFTER_SCHOOL_VERIFY_MYSQL_PORT: "18308"
+          AFTER_SCHOOL_VERIFY_WEB_PORT: "15174"
         run: |
           export AFTER_SCHOOL_MYSQL84_HOME="$(brew --prefix mysql@8.4)"
           ./scripts/verify.sh

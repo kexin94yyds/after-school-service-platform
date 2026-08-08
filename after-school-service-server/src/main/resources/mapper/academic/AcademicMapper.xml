@@ -501,6 +501,24 @@
         a.created_at AS createdAt
     </sql>
 
+    <resultMap id="scheduleAdjustmentResource"
+            type="com.afterschool.platform.academic.ScheduleAdjustmentResource">
+        <id property="id" column="id"/>
+        <result property="schoolId" column="school_id"/>
+        <result property="sessionId" column="session_id"/>
+        <result property="originalSessionDate" column="original_session_date"/>
+        <result property="originalStartTime" column="original_start_time"/>
+        <result property="originalEndTime" column="original_end_time"/>
+        <result property="originalRoomId" column="original_room_id"/>
+        <result property="originalClassroom" column="original_classroom"/>
+        <result property="adjustedSessionDate" column="adjusted_session_date"/>
+        <result property="adjustedStartTime" column="adjusted_start_time"/>
+        <result property="adjustedEndTime" column="adjusted_end_time"/>
+        <result property="adjustedRoomId" column="adjusted_room_id"/>
+        <result property="adjustedClassroom" column="adjusted_classroom"/>
+        <result property="status" column="status"/>
+    </resultMap>
+
     <select id="listScheduleAdjustments" resultType="map">
         SELECT <include refid="adjustmentColumns"/>
         FROM schedule_adjustment a
@@ -676,6 +694,66 @@
         LIMIT 1
     </select>
 
+    <select id="lockActiveEnrollmentStudentIds" resultType="long">
+        SELECT st.id
+        FROM student st
+        JOIN enrollment e ON e.student_id = st.id
+        WHERE e.offering_id = #{offeringId}
+          AND e.status = 'ENROLLED'
+        ORDER BY st.id
+        FOR UPDATE
+    </select>
+
+    <!--
+        Schedule mutations run in a READ COMMITTED outer transaction.  This
+        ordinary consistent read therefore observes the latest committed view
+        at statement start after the shared student lock becomes available,
+        without taking a reverse lock on another offering or lesson.
+    -->
+    <select id="findStudentSessionConflict" resultType="long">
+        SELECT conflicts.id
+        FROM (
+            /* Existing effective sessions include adjusted date/time values
+               written to lesson_session by an earlier reschedule. */
+            SELECT existing_session.id
+            FROM enrollment e
+            JOIN course_offering existing ON existing.id = e.offering_id
+            JOIN lesson_session existing_session
+              ON existing_session.offering_id = existing.id
+            WHERE e.student_id = #{studentId}
+              AND e.status = 'ENROLLED'
+              AND existing.id != #{offeringId}
+              AND existing.status NOT IN ('CANCELED', 'FINISHED')
+              AND existing_session.status != 'CANCELED'
+              AND existing_session.session_date = #{sessionDate}
+              AND existing_session.start_time &lt; #{endTime}
+              AND existing_session.end_time &gt; #{startTime}
+            UNION ALL
+            /* A course without an effective generated lesson retains the
+               offering template as a conflict guard. */
+            SELECT existing.id
+            FROM enrollment e
+            JOIN course_offering existing ON existing.id = e.offering_id
+            WHERE e.student_id = #{studentId}
+              AND e.status = 'ENROLLED'
+              AND existing.id != #{offeringId}
+              AND existing.status NOT IN ('CANCELED', 'FINISHED')
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM lesson_session existing_session
+                  WHERE existing_session.offering_id = existing.id
+                    AND existing_session.status != 'CANCELED'
+              )
+              AND existing.week_day = WEEKDAY(#{sessionDate}) + 1
+              AND existing.start_date &lt;= #{sessionDate}
+              AND existing.end_date &gt;= #{sessionDate}
+              AND existing.start_time &lt; #{endTime}
+              AND existing.end_time &gt; #{startTime}
+        ) conflicts
+        ORDER BY conflicts.id
+        LIMIT 1
+    </select>
+
     <insert id="insertScheduleAdjustment">
         INSERT INTO schedule_adjustment (
             school_id, session_id,
@@ -720,6 +798,65 @@
           AND a.requested_by = #{requestedBy}
         ORDER BY a.id DESC
         LIMIT 1
+    </select>
+
+    <select id="findScheduleAdjustmentResource" resultMap="scheduleAdjustmentResource">
+        SELECT id, school_id, session_id,
+               original_session_date, original_start_time, original_end_time,
+               original_room_id, original_classroom,
+               adjusted_session_date, adjusted_start_time, adjusted_end_time,
+               adjusted_room_id, adjusted_classroom, status
+        FROM schedule_adjustment
+        WHERE id = #{adjustmentId}
+    </select>
+
+    <select id="lockScheduleAdjustmentResource" resultMap="scheduleAdjustmentResource">
+        SELECT id, school_id, session_id,
+               original_session_date, original_start_time, original_end_time,
+               original_room_id, original_classroom,
+               adjusted_session_date, adjusted_start_time, adjusted_end_time,
+               adjusted_room_id, adjusted_classroom, status
+        FROM schedule_adjustment
+        WHERE id = #{adjustmentId}
+          AND school_id = #{schoolId}
+        FOR UPDATE
+    </select>
+
+    <select id="lockLatestAppliedScheduleAdjustment" resultMap="scheduleAdjustmentResource">
+        SELECT id, school_id, session_id,
+               original_session_date, original_start_time, original_end_time,
+               original_room_id, original_classroom,
+               adjusted_session_date, adjusted_start_time, adjusted_end_time,
+               adjusted_room_id, adjusted_classroom, status
+        FROM schedule_adjustment
+        WHERE session_id = #{sessionId}
+          AND school_id = #{schoolId}
+          AND status = 'APPLIED'
+        ORDER BY id DESC
+        LIMIT 1
+        FOR UPDATE
+    </select>
+
+    <update id="markScheduleAdjustmentReverted">
+        UPDATE schedule_adjustment
+        SET status = 'REVERTED'
+        WHERE id = #{adjustmentId}
+          AND school_id = #{schoolId}
+          AND status = 'APPLIED'
+    </update>
+
+    <select id="findScheduleAdjustmentView" resultType="map">
+        SELECT <include refid="adjustmentColumns"/>
+        FROM schedule_adjustment a
+        JOIN school s ON s.id = a.school_id
+        JOIN lesson_session ls ON ls.id = a.session_id
+        JOIN course_offering o ON o.id = ls.offering_id
+        JOIN course c ON c.id = o.course_id
+        JOIN teacher ON teacher.id = o.teacher_id
+        JOIN school_room adjusted_room ON adjusted_room.id = a.adjusted_room_id
+        JOIN sys_user requester ON requester.id = a.requested_by
+        WHERE a.id = #{adjustmentId}
+          AND a.school_id = #{schoolId}
     </select>
 
     <select id="findRoomOfferingConflict" resultType="long">

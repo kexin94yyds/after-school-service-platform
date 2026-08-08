@@ -21,6 +21,7 @@ const plans = ref<ServicePlan[]>([])
 const alerts = ref<SupervisionAlert[]>([])
 const loading = ref(false)
 const error = ref('')
+let loadVersion = 0
 
 const metrics = computed<DashboardMetric[]>(() => [
   {
@@ -106,22 +107,34 @@ const shortcuts = [
 ]
 
 async function load(): Promise<void> {
+  const requestVersion = ++loadVersion
   loading.value = true
   error.value = ''
-  try {
-    const [overviewResult, planItems, alertItems] = await Promise.all([
-      reportApi.getOverview(),
-      academicApi.getServicePlans(),
-      supervisionApi.list(),
-    ])
-    overview.value = overviewResult
-    plans.value = planItems
-    alerts.value = alertItems
-  } catch (loadError) {
-    error.value = getErrorMessage(loadError, '监管概览加载失败。')
-  } finally {
-    loading.value = false
+  const [overviewResult, planResult, alertResult] = await Promise.allSettled([
+    reportApi.getOverview(),
+    academicApi.getServicePlans(),
+    supervisionApi.list(),
+  ])
+  if (requestVersion !== loadVersion) return
+
+  const messages: string[] = []
+  if (overviewResult.status === 'fulfilled') overview.value = overviewResult.value
+  else {
+    overview.value = null
+    messages.push(getErrorMessage(overviewResult.reason, '区域统计加载失败。'))
   }
+  if (planResult.status === 'fulfilled') plans.value = planResult.value
+  else {
+    plans.value = []
+    messages.push(getErrorMessage(planResult.reason, '备案待办加载失败。'))
+  }
+  if (alertResult.status === 'fulfilled') alerts.value = alertResult.value
+  else {
+    alerts.value = []
+    messages.push(getErrorMessage(alertResult.reason, '监管待办加载失败。'))
+  }
+  error.value = messages.join(' ')
+  loading.value = false
 }
 
 onMounted(load)

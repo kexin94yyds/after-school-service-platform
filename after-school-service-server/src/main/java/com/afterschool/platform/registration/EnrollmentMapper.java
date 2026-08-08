@@ -1,5 +1,6 @@
 package com.afterschool.platform.registration;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import org.apache.ibatis.annotations.Param;
@@ -21,6 +22,8 @@ public interface EnrollmentMapper {
     EnrollmentOffering findOffering(@Param("offeringId") long offeringId);
 
     EnrollmentOffering lockOffering(@Param("offeringId") long offeringId);
+
+    LocalDateTime findFirstValidSessionStart(@Param("offeringId") long offeringId);
 
     EnrollmentState findEnrollmentState(
             @Param("offeringId") long offeringId, @Param("studentId") long studentId);

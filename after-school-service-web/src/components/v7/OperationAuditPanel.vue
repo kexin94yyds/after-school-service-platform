@@ -21,6 +21,7 @@ const schools = ref<SchoolOption[]>([])
 const loading = ref(false)
 const schoolLoading = ref(false)
 const error = ref('')
+let logLoadVersion = 0
 
 const filters = reactive<{
   schoolId: number | null
@@ -124,27 +125,32 @@ async function loadSchools(): Promise<void> {
 }
 
 async function loadLogs(options: { saveQuery?: boolean } = {}): Promise<void> {
+  const requestVersion = ++logLoadVersion
+  const query = {
+    schoolId: props.mode === 'regulator' ? filters.schoolId : undefined,
+    actorUserId: actorIdFilter(),
+    method: filters.method,
+    pathPrefix: filters.pathPrefix.trim(),
+    occurredFrom: filters.dateRange?.[0]
+      ? `${filters.dateRange[0]}T00:00:00`
+      : undefined,
+    occurredTo: filters.dateRange?.[1]
+      ? `${filters.dateRange[1]}T23:59:59`
+      : undefined,
+  }
   loading.value = true
   error.value = ''
   try {
     if (options.saveQuery) await saveFiltersToUrl()
-    logs.value = await auditApi.list({
-      schoolId: props.mode === 'regulator' ? filters.schoolId : undefined,
-      actorUserId: actorIdFilter(),
-      method: filters.method,
-      pathPrefix: filters.pathPrefix.trim(),
-      occurredFrom: filters.dateRange?.[0]
-        ? `${filters.dateRange[0]}T00:00:00`
-        : undefined,
-      occurredTo: filters.dateRange?.[1]
-        ? `${filters.dateRange[1]}T23:59:59`
-        : undefined,
-    })
+    const rows = await auditApi.list(query)
+    if (requestVersion === logLoadVersion) logs.value = rows
   } catch (loadError) {
-    logs.value = []
-    error.value = getErrorMessage(loadError, '操作审计记录加载失败。')
+    if (requestVersion === logLoadVersion) {
+      logs.value = []
+      error.value = getErrorMessage(loadError, '操作审计记录加载失败。')
+    }
   } finally {
-    loading.value = false
+    if (requestVersion === logLoadVersion) loading.value = false
   }
 }
 

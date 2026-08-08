@@ -132,6 +132,13 @@
         FOR UPDATE
     </select>
 
+    <select id="findFirstValidSessionStart" resultType="java.time.LocalDateTime">
+        SELECT MIN(TIMESTAMP(session_date, start_time))
+        FROM lesson_session
+        WHERE offering_id = #{offeringId}
+          AND status != 'CANCELED'
+    </select>
+
     <select id="findEnrollmentState" resultMap="state">
         SELECT id, status
         FROM enrollment
@@ -147,12 +154,86 @@
         WHERE e.student_id = #{studentId}
           AND e.status = 'ENROLLED'
           AND e.offering_id != #{offeringId}
-          AND existing.week_day = candidate.week_day
-          AND existing.start_date &lt;= candidate.end_date
-          AND existing.end_date &gt;= candidate.start_date
-          AND existing.start_time &lt; candidate.end_time
-          AND existing.end_time &gt; candidate.start_time
           AND existing.status NOT IN ('CANCELED', 'FINISHED')
+          AND (
+              /* Both offerings have real effective sessions: compare the
+                 adjusted lesson_session dates/times directly. */
+              EXISTS (
+                  SELECT 1
+                  FROM lesson_session existing_session
+                  JOIN lesson_session candidate_session
+                    ON candidate_session.offering_id = candidate.id
+                   AND candidate_session.status != 'CANCELED'
+                   AND candidate_session.session_date = existing_session.session_date
+                   AND candidate_session.start_time &lt; existing_session.end_time
+                   AND candidate_session.end_time &gt; existing_session.start_time
+                  WHERE existing_session.offering_id = existing.id
+                    AND existing_session.status != 'CANCELED'
+              )
+              /* A target offering with no generated effective session still
+                 protects its template against an existing actual session. */
+              OR (
+                  NOT EXISTS (
+                      SELECT 1
+                      FROM lesson_session candidate_session
+                      WHERE candidate_session.offering_id = candidate.id
+                        AND candidate_session.status != 'CANCELED'
+                  )
+                  AND EXISTS (
+                      SELECT 1
+                      FROM lesson_session existing_session
+                      WHERE existing_session.offering_id = existing.id
+                        AND existing_session.status != 'CANCELED'
+                        AND candidate.week_day = WEEKDAY(existing_session.session_date) + 1
+                        AND candidate.start_date &lt;= existing_session.session_date
+                        AND candidate.end_date &gt;= existing_session.session_date
+                        AND candidate.start_time &lt; existing_session.end_time
+                        AND candidate.end_time &gt; existing_session.start_time
+                  )
+              )
+              /* Conversely, protect an existing no-session template against
+                 a real (including rescheduled) target lesson. */
+              OR (
+                  NOT EXISTS (
+                      SELECT 1
+                      FROM lesson_session existing_session
+                      WHERE existing_session.offering_id = existing.id
+                        AND existing_session.status != 'CANCELED'
+                  )
+                  AND EXISTS (
+                      SELECT 1
+                      FROM lesson_session candidate_session
+                      WHERE candidate_session.offering_id = candidate.id
+                        AND candidate_session.status != 'CANCELED'
+                        AND existing.week_day = WEEKDAY(candidate_session.session_date) + 1
+                        AND existing.start_date &lt;= candidate_session.session_date
+                        AND existing.end_date &gt;= candidate_session.session_date
+                        AND existing.start_time &lt; candidate_session.end_time
+                        AND existing.end_time &gt; candidate_session.start_time
+                  )
+              )
+              /* Only when neither offering has an effective session may the
+                 recurring offering templates decide the conflict. */
+              OR (
+                  NOT EXISTS (
+                      SELECT 1
+                      FROM lesson_session existing_session
+                      WHERE existing_session.offering_id = existing.id
+                        AND existing_session.status != 'CANCELED'
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM lesson_session candidate_session
+                      WHERE candidate_session.offering_id = candidate.id
+                        AND candidate_session.status != 'CANCELED'
+                  )
+                  AND existing.week_day = candidate.week_day
+                  AND existing.start_date &lt;= candidate.end_date
+                  AND existing.end_date &gt;= candidate.start_date
+                  AND existing.start_time &lt; candidate.end_time
+                  AND existing.end_time &gt; candidate.start_time
+              )
+          )
     </select>
 
     <update id="incrementCapacity">

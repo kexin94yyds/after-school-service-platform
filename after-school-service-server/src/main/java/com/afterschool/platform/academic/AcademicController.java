@@ -146,6 +146,12 @@ public class AcademicController {
                 .body(created);
     }
 
+    @PostMapping("/schedule-adjustments/{adjustmentId}/revert")
+    @PreAuthorize("hasRole('SCHOOL_ADMIN')")
+    Map<String, Object> revertScheduleAdjustment(@PathVariable long adjustmentId) {
+        return service.revertScheduleAdjustment(adjustmentId);
+    }
+
     public record TermRequest(
             @NotBlank @Size(max = 32) String termCode,
             @NotBlank @Size(max = 128) String termName,

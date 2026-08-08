@@ -6,10 +6,12 @@ import com.afterschool.platform.common.ApiException;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -301,7 +303,7 @@ public class AcademicService {
                 teacherId);
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Map<String, Object> reschedule(
             long sessionId, AcademicController.RescheduleRequest request) {
         if (!request.startTime().isBefore(request.endTime())) {
@@ -321,20 +323,13 @@ public class AcademicService {
         if (mapper.lockTeacher(snapshot.getTeacherId(), schoolId) == null) {
             throw ApiException.notFound("课次教师不存在或不在当前学校");
         }
-        RoomResource room = mapper.lockRoom(request.roomId(), schoolId);
-        if (room == null || !"ACTIVE".equals(room.getStatus())) {
-            throw ApiException.badRequest(
-                    "INVALID_ROOM",
-                    "教室不存在、不属于当前学校或已停用");
-        }
-        if (room.getCapacity() < snapshot.getOfferingCapacity()) {
-            throw ApiException.badRequest(
-                    "ROOM_CAPACITY_TOO_SMALL",
-                    "教室容量不能低于开班容量");
-        }
+        RoomResource room = lockTargetRoom(
+                request.roomId(), schoolId, snapshot.getOfferingCapacity());
         if (mapper.lockOffering(snapshot.getOfferingId(), schoolId) == null) {
             throw ApiException.notFound("课次所属开班不存在或已变化");
         }
+        List<Long> enrolledStudentIds =
+                lockActiveEnrollmentStudentIds(snapshot.getOfferingId());
         SessionResource current = mapper.lockSessionResource(sessionId);
         if (current == null
                 || current.getOfferingId() != snapshot.getOfferingId()
@@ -342,40 +337,20 @@ public class AcademicService {
                 || current.getSchoolId() != schoolId) {
             throw ApiException.notFound("课次不存在或资源关联已变化");
         }
-        validateReschedulable(current, request);
-        if (mapper.countSessionAttendance(sessionId) > 0) {
-            throw ApiException.conflict(
-                    "SESSION_HAS_ATTENDANCE",
-                    "已有考勤记录的课次不能调课");
-        }
-        if (mapper.countClosedCalendarDay(schoolId, request.sessionDate()) > 0) {
-            throw ApiException.conflict(
-                    "CALENDAR_DAY_CLOSED",
-                    "目标日期为放假或停课日");
-        }
-        if (mapper.findTeacherSessionConflict(
-                        current.getTeacherId(),
-                        sessionId,
-                        request.sessionDate(),
-                        request.startTime(),
-                        request.endTime())
-                != null) {
-            throw ApiException.conflict(
-                    "TEACHER_SCHEDULE_CONFLICT",
-                    "该教师在调课目标时段已有其他课次或开班");
-        }
-        if (mapper.findRoomSessionConflict(
-                        schoolId,
-                        request.roomId(),
-                        sessionId,
-                        request.sessionDate(),
-                        request.startTime(),
-                        request.endTime())
-                != null) {
-            throw ApiException.conflict(
-                    "ROOM_SCHEDULE_CONFLICT",
-                    "该教室在调课目标时段已被占用");
-        }
+        validateScheduleTarget(
+                current,
+                request.sessionDate(),
+                request.startTime(),
+                request.endTime(),
+                room.getId());
+        validateScheduleMutation(
+                current,
+                schoolId,
+                request.sessionDate(),
+                request.startTime(),
+                request.endTime(),
+                room.getId(),
+                enrolledStudentIds);
 
         long actorId = currentUser.principal().id();
         LocalDateTime appliedAt = LocalDateTime.now(clock);
@@ -409,6 +384,195 @@ public class AcademicService {
                     "课次已被其他操作更新，请刷新后重试");
         }
         return mapper.findLatestScheduleAdjustment(sessionId, actorId);
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public Map<String, Object> revertScheduleAdjustment(long adjustmentId) {
+        ScheduleAdjustmentResource snapshot =
+                mapper.findScheduleAdjustmentResource(adjustmentId);
+        if (snapshot == null) {
+            throw ApiException.notFound("调课记录不存在");
+        }
+        long schoolId = currentUser.schoolScope(snapshot.getSchoolId());
+        SessionResource sessionSnapshot = mapper.findSessionResource(snapshot.getSessionId());
+        if (sessionSnapshot == null || sessionSnapshot.getSchoolId() != schoolId) {
+            throw ApiException.notFound("调课关联课次不存在或不在当前学校");
+        }
+
+        // The mutation lock order is shared with reschedule and enrollment:
+        // term -> teacher -> target room -> offering -> students -> lesson.
+        // Acquiring shared student locks before either transaction locks its own
+        // lesson prevents a second schedule mutation from forming a
+        // student/lesson deadlock while its fresh conflict read runs.
+        if (sessionSnapshot.getTermId() != null
+                && mapper.lockTerm(sessionSnapshot.getTermId()) == null) {
+            throw ApiException.notFound("课次所属学期不存在");
+        }
+        if (mapper.lockTeacher(sessionSnapshot.getTeacherId(), schoolId) == null) {
+            throw ApiException.notFound("课次教师不存在或不在当前学校");
+        }
+        lockTargetRoomIfPresent(
+                snapshot.getOriginalRoomId(),
+                schoolId,
+                sessionSnapshot.getOfferingCapacity());
+        if (mapper.lockOffering(sessionSnapshot.getOfferingId(), schoolId) == null) {
+            throw ApiException.notFound("课次所属开班不存在或已变化");
+        }
+        List<Long> enrolledStudentIds =
+                lockActiveEnrollmentStudentIds(sessionSnapshot.getOfferingId());
+        SessionResource current = mapper.lockSessionResource(snapshot.getSessionId());
+        if (current == null
+                || current.getOfferingId() != sessionSnapshot.getOfferingId()
+                || current.getTeacherId() != sessionSnapshot.getTeacherId()
+                || current.getSchoolId() != schoolId) {
+            throw ApiException.notFound("课次不存在或资源关联已变化");
+        }
+        ScheduleAdjustmentResource adjustment =
+                mapper.lockScheduleAdjustmentResource(adjustmentId, schoolId);
+        if (adjustment == null || adjustment.getSessionId() != current.getId()) {
+            throw ApiException.notFound("调课记录不存在或已变化");
+        }
+        if (!"APPLIED".equals(adjustment.getStatus())) {
+            throw ApiException.conflict(
+                    "SCHEDULE_ADJUSTMENT_NOT_ACTIVE",
+                    "该调课记录已经撤销或不再生效");
+        }
+        ScheduleAdjustmentResource latest =
+                mapper.lockLatestAppliedScheduleAdjustment(current.getId(), schoolId);
+        if (latest == null || latest.getId() != adjustment.getId()) {
+            throw ApiException.conflict(
+                    "SCHEDULE_ADJUSTMENT_NOT_LATEST",
+                    "只能撤销当前仍生效的最新调课记录");
+        }
+        if (!scheduleMatches(
+                current,
+                adjustment.getAdjustedSessionDate(),
+                adjustment.getAdjustedStartTime(),
+                adjustment.getAdjustedEndTime(),
+                adjustment.getAdjustedRoomId())) {
+            throw ApiException.conflict(
+                    "SESSION_CHANGED",
+                    "当前课次安排与调课记录不一致，请刷新后重试");
+        }
+        validateScheduleTarget(
+                current,
+                adjustment.getOriginalSessionDate(),
+                adjustment.getOriginalStartTime(),
+                adjustment.getOriginalEndTime(),
+                adjustment.getOriginalRoomId());
+        validateScheduleMutation(
+                current,
+                schoolId,
+                adjustment.getOriginalSessionDate(),
+                adjustment.getOriginalStartTime(),
+                adjustment.getOriginalEndTime(),
+                adjustment.getOriginalRoomId(),
+                enrolledStudentIds);
+
+        if (mapper.updateSessionSchedule(
+                        current.getId(),
+                        schoolId,
+                        adjustment.getOriginalSessionDate(),
+                        adjustment.getOriginalStartTime(),
+                        adjustment.getOriginalEndTime(),
+                        adjustment.getOriginalRoomId(),
+                        adjustment.getOriginalClassroom())
+                != 1) {
+            throw ApiException.conflict(
+                    "SESSION_CHANGED",
+                    "课次已被其他操作更新，请刷新后重试");
+        }
+        if (mapper.markScheduleAdjustmentReverted(adjustment.getId(), schoolId) != 1) {
+            throw ApiException.conflict(
+                    "SCHEDULE_ADJUSTMENT_CHANGED",
+                    "调课记录状态已变化，请刷新后重试");
+        }
+        return mapper.findScheduleAdjustmentView(adjustment.getId(), schoolId);
+    }
+
+    private RoomResource lockTargetRoom(
+            long roomId, long schoolId, int offeringCapacity) {
+        RoomResource room = mapper.lockRoom(roomId, schoolId);
+        if (room == null || !"ACTIVE".equals(room.getStatus())) {
+            throw ApiException.badRequest(
+                    "INVALID_ROOM",
+                    "教室不存在、不属于当前学校或已停用");
+        }
+        if (room.getCapacity() < offeringCapacity) {
+            throw ApiException.badRequest(
+                    "ROOM_CAPACITY_TOO_SMALL",
+                    "教室容量不能低于开班容量");
+        }
+        return room;
+    }
+
+    private void lockTargetRoomIfPresent(
+            Long roomId, long schoolId, int offeringCapacity) {
+        if (roomId != null) {
+            lockTargetRoom(roomId, schoolId, offeringCapacity);
+        }
+    }
+
+    private List<Long> lockActiveEnrollmentStudentIds(long offeringId) {
+        List<Long> studentIds = mapper.lockActiveEnrollmentStudentIds(offeringId);
+        return studentIds == null ? List.of() : studentIds;
+    }
+
+    private void validateScheduleMutation(
+            SessionResource current,
+            long schoolId,
+            LocalDate sessionDate,
+            LocalTime startTime,
+            LocalTime endTime,
+            Long roomId,
+            List<Long> enrolledStudentIds) {
+        if (mapper.countSessionAttendance(current.getId()) > 0) {
+            throw ApiException.conflict(
+                    "SESSION_HAS_ATTENDANCE",
+                    "已有考勤记录的课次不能调课");
+        }
+        if (mapper.countClosedCalendarDay(schoolId, sessionDate) > 0) {
+            throw ApiException.conflict(
+                    "CALENDAR_DAY_CLOSED",
+                    "目标日期为放假或停课日");
+        }
+        if (mapper.findTeacherSessionConflict(
+                        current.getTeacherId(),
+                        current.getId(),
+                        sessionDate,
+                        startTime,
+                        endTime)
+                != null) {
+            throw ApiException.conflict(
+                    "TEACHER_SCHEDULE_CONFLICT",
+                    "该教师在调课目标时段已有其他课次或开班");
+        }
+        if (roomId != null
+                && mapper.findRoomSessionConflict(
+                                schoolId,
+                                roomId,
+                                current.getId(),
+                                sessionDate,
+                                startTime,
+                                endTime)
+                        != null) {
+            throw ApiException.conflict(
+                    "ROOM_SCHEDULE_CONFLICT",
+                    "该教室在调课目标时段已被占用");
+        }
+        for (Long studentId : enrolledStudentIds) {
+            if (mapper.findStudentSessionConflict(
+                            studentId,
+                            current.getOfferingId(),
+                            sessionDate,
+                            startTime,
+                            endTime)
+                    != null) {
+                throw ApiException.conflict(
+                        "STUDENT_SCHEDULE_CONFLICT",
+                        "调课后会与学生已报名的其他课程发生时间冲突");
+            }
+        }
     }
 
     private void reconcileClosedCalendarDay(
@@ -485,8 +649,17 @@ public class AcademicService {
         return term;
     }
 
-    private void validateReschedulable(
-            SessionResource current, AcademicController.RescheduleRequest request) {
+    private void validateScheduleTarget(
+            SessionResource current,
+            LocalDate sessionDate,
+            LocalTime startTime,
+            LocalTime endTime,
+            Long roomId) {
+        if (!startTime.isBefore(endTime)) {
+            throw ApiException.badRequest(
+                    "INVALID_TIME_RANGE",
+                    "调课开始时间必须早于结束时间");
+        }
         if (!"SCHEDULED".equals(current.getStatus())) {
             throw ApiException.conflict(
                     "SESSION_NOT_RESCHEDULABLE",
@@ -503,7 +676,7 @@ public class AcademicService {
                     "SESSION_ALREADY_STARTED",
                     "已开始的课次不能调课");
         }
-        if (!now.isBefore(LocalDateTime.of(request.sessionDate(), request.startTime()))) {
+        if (!now.isBefore(LocalDateTime.of(sessionDate, startTime))) {
             throw ApiException.badRequest(
                     "RESCHEDULE_IN_PAST",
                     "调课后的开始时间必须晚于当前时间");
@@ -514,21 +687,31 @@ public class AcademicService {
         LocalDate upper = current.getTermEndDate() == null
                 ? current.getOfferingEndDate()
                 : current.getTermEndDate();
-        if (request.sessionDate().isBefore(lower)
-                || request.sessionDate().isAfter(upper)) {
+        if (sessionDate.isBefore(lower)
+                || sessionDate.isAfter(upper)) {
             throw ApiException.badRequest(
                     "RESCHEDULE_DATE_OUT_OF_RANGE",
                     "调课日期必须位于开班所属学期或原开班日期范围内");
         }
-        boolean unchanged = Objects.equals(current.getSessionDate(), request.sessionDate())
-                && Objects.equals(current.getStartTime(), request.startTime())
-                && Objects.equals(current.getEndTime(), request.endTime())
-                && Objects.equals(current.getRoomId(), request.roomId());
+        boolean unchanged = scheduleMatches(
+                current, sessionDate, startTime, endTime, roomId);
         if (unchanged) {
             throw ApiException.badRequest(
                     "NO_SCHEDULE_CHANGE",
                     "调课后的日期、时间和教室与当前安排完全相同");
         }
+    }
+
+    private boolean scheduleMatches(
+            SessionResource current,
+            LocalDate sessionDate,
+            LocalTime startTime,
+            LocalTime endTime,
+            Long roomId) {
+        return Objects.equals(current.getSessionDate(), sessionDate)
+                && Objects.equals(current.getStartTime(), startTime)
+                && Objects.equals(current.getEndTime(), endTime)
+                && Objects.equals(current.getRoomId(), roomId);
     }
 
     private void validateTermRange(LocalDate startDate, LocalDate endDate) {

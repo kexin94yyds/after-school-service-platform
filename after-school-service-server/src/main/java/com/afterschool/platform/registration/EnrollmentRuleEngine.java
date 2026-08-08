@@ -15,6 +15,28 @@ public class EnrollmentRuleEngine {
             EnrollmentState existing,
             boolean hasScheduleConflict,
             LocalDateTime now) {
+        validate(
+                student,
+                offering,
+                existing,
+                hasScheduleConflict,
+                templateFirstSessionStart(offering),
+                now);
+    }
+
+    /**
+     * Validates an enrollment against the effective first lesson.  Callers must
+     * supply the first non-cancelled {@code lesson_session} when one exists;
+     * {@link #templateFirstSessionStart(EnrollmentOffering)} is only the
+     * no-session fallback.
+     */
+    public void validate(
+            EnrollmentStudent student,
+            EnrollmentOffering offering,
+            EnrollmentState existing,
+            boolean hasScheduleConflict,
+            LocalDateTime firstSessionStart,
+            LocalDateTime now) {
         if (!"ACTIVE".equals(student.getStatus())) {
             throw ApiException.conflict("STUDENT_INACTIVE", "学生状态不可报名");
         }
@@ -30,7 +52,7 @@ public class EnrollmentRuleEngine {
         if (now.isBefore(offering.getEnrollmentStart()) || now.isAfter(offering.getEnrollmentEnd())) {
             throw ApiException.conflict("OUTSIDE_ENROLLMENT_WINDOW", "当前不在报名开放时间内");
         }
-        if (!now.isBefore(firstSessionStart(offering))) {
+        if (!now.isBefore(firstSessionStart)) {
             throw ApiException.conflict(
                     "ENROLLMENT_CLOSED_AFTER_START",
                     "首节课开始后不能再报名");
@@ -51,14 +73,21 @@ public class EnrollmentRuleEngine {
     }
 
     public void validateCancellation(EnrollmentOffering offering, LocalDateTime now) {
-        if (!now.isBefore(firstSessionStart(offering))) {
+        validateCancellation(offering, templateFirstSessionStart(offering), now);
+    }
+
+    public void validateCancellation(
+            EnrollmentOffering offering,
+            LocalDateTime firstSessionStart,
+            LocalDateTime now) {
+        if (!now.isBefore(firstSessionStart)) {
             throw ApiException.conflict(
                     "CANCELLATION_CLOSED",
                     "课程开始后不能由家长直接取消报名，请联系学校处理");
         }
     }
 
-    private LocalDateTime firstSessionStart(EnrollmentOffering offering) {
+    public LocalDateTime templateFirstSessionStart(EnrollmentOffering offering) {
         LocalDate firstSessionDate = offering.getStartDate();
         DayOfWeek targetDay = DayOfWeek.of(offering.getWeekDay());
         while (firstSessionDate.getDayOfWeek() != targetDay) {

@@ -12,6 +12,7 @@ import type {
 } from '@/api/evaluations'
 import { getErrorMessage, toApiClientError } from '@/api/http'
 import PageHeader from '@/components/PageHeader.vue'
+import { useLongFormGuard } from '@/composables/useLongFormGuard'
 import {
   combineDateAndTime,
   formatDate,
@@ -42,6 +43,15 @@ const selectedCandidate = ref<EvaluationCandidate | null>(null)
 const form = reactive({
   rating: 0,
   comment: '',
+})
+const {
+  beforeClose: beforeEvaluationDialogClose,
+  captureBaseline: captureEvaluationBaseline,
+  requestClose: requestEvaluationDialogClose,
+} = useLongFormGuard({
+  visible: dialogVisible,
+  saving: submitting,
+  snapshot: () => ({ ...form }),
 })
 
 const selectedStudent = computed(() =>
@@ -187,6 +197,7 @@ function openEvaluation(candidate: EvaluationCandidate): void {
   form.rating = 0
   form.comment = ''
   dialogError.value = ''
+  captureEvaluationBaseline()
   dialogVisible.value = true
 }
 
@@ -212,12 +223,14 @@ async function submitEvaluation(): Promise<void> {
       comment: comment || null,
     })
     rememberSubmitted(candidate)
+    captureEvaluationBaseline()
     dialogVisible.value = false
     ElMessage.success('课程评价已提交')
   } catch (submitError) {
     const apiError = toApiClientError(submitError, '课程评价提交失败。')
     if (apiError.code === 'EVALUATION_ALREADY_SUBMITTED') {
       rememberSubmitted(candidate)
+      captureEvaluationBaseline()
       dialogVisible.value = false
       ElMessage.info('该学生已经评价过此课程')
     } else {
@@ -342,7 +355,12 @@ onMounted(refresh)
       <span>请联系学校核对监护关系和学生状态。</span>
     </div>
 
-    <el-dialog v-model="dialogVisible" title="提交课程评价" width="min(560px, 92vw)">
+    <el-dialog
+      v-model="dialogVisible"
+      title="提交课程评价"
+      width="min(560px, 92vw)"
+      :before-close="beforeEvaluationDialogClose"
+    >
       <div v-if="selectedCandidate" class="dialog-course">
         <span>{{ selectedCandidate.enrollment.offeringCode }}</span>
         <strong>{{ selectedCandidate.enrollment.courseName }}</strong>
@@ -378,7 +396,9 @@ onMounted(refresh)
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button :disabled="submitting" @click="dialogVisible = false">取消</el-button>
+        <el-button :disabled="submitting" @click="requestEvaluationDialogClose">
+          取消
+        </el-button>
         <el-button type="primary" :loading="submitting" @click="submitEvaluation">
           确认提交
         </el-button>

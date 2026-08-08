@@ -44,6 +44,8 @@ JAR 和前端发布目录只允许 root 写入。后端服务用户只能读取�
 
 生产数据库账号只授予应用所需库的最小 DML/DDL 权限。数据库 URL 必须使用 `sslMode=VERIFY_IDENTITY`，并确保主机名与数据库证书 SAN 匹配。同时必须包含唯一的 `connectionTimeZone=%2B08%3A00` 和 `forceConnectionTimeZoneToSession=true`，使连接会话时区在驱动建立连接时固定为 `+08:00`。
 
+监管扫描默认每日 02:00（`Asia/Shanghai`）执行。可在 EnvironmentFile 中用 `SUPERVISION_SCAN_ENABLED`、`SUPERVISION_SCAN_CRON`、`SUPERVISION_SCAN_ZONE` 和 `SUPERVISION_SCAN_STALE_AFTER` 调整；cron 含空格，必须保持引号。只关闭定时任务不会禁用监管员手工扫描。首次发布后应在监管端“扫描记录”确认运行来源、起止时间、成败和失败摘要。
+
 ## 4. 首次监管员
 
 只在空生产库首次启动时创建监管员。把一次性密码写入 `/etc/after-school-service/bootstrap-password`，权限设为 `0600 root:root`，并创建临时 systemd drop-in：
@@ -162,7 +164,7 @@ sudo journalctl -u after-school-backup.service --since today
 5. 发布后端 JAR并等待 readiness；
 6. 发布前端不可变版本；
 7. 执行生产预检；
-8. 观察 journal、错误率和登录限流至少 15 分钟。
+8. 观察 journal、错误率和登录限流至少 15 分钟，并确认一次手工监管扫描在运行记录中成功收尾。
 
 CI 使用 `security` Maven profile 执行 OWASP Dependency-Check，CVSS 7.0 及以上已知漏洞会阻断构建；CycloneDX JSON SBOM 在正常 `package` 阶段生成。可在本地复现：
 

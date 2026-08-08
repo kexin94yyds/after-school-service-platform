@@ -238,6 +238,116 @@
         )
     </insert>
 
+    <insert id="insertSystemAction">
+        INSERT INTO supervision_alert_action (
+            school_id,
+            alert_id,
+            from_status,
+            to_status,
+            action_type,
+            comment,
+            actor_id,
+            actor_role
+        ) VALUES (
+            #{schoolId},
+            #{alertId},
+            #{fromStatus},
+            #{toStatus},
+            #{actionType},
+            #{comment},
+            NULL,
+            'SYSTEM'
+        )
+    </insert>
+
+    <insert id="insertScanRun">
+        INSERT INTO supervision_scan_run (
+            id,
+            trigger_source,
+            status,
+            started_at,
+            operator_user_id
+        ) VALUES (
+            #{id},
+            #{triggerSource},
+            'RUNNING',
+            #{startedAt},
+            #{operatorUserId}
+        )
+    </insert>
+
+    <insert id="insertFailedScanRun">
+        INSERT INTO supervision_scan_run (
+            id,
+            trigger_source,
+            status,
+            started_at,
+            finished_at,
+            failure_summary,
+            operator_user_id
+        ) VALUES (
+            #{id},
+            #{triggerSource},
+            'FAILED',
+            #{startedAt},
+            #{finishedAt},
+            #{failureSummary},
+            #{operatorUserId}
+        )
+    </insert>
+
+    <update id="completeScanRun">
+        UPDATE supervision_scan_run
+        SET status = 'SUCCESS',
+            finished_at = #{finishedAt},
+            candidate_count = #{candidateCount},
+            created_count = #{createdCount},
+            failure_summary = NULL
+        WHERE id = #{id}
+          AND status = 'RUNNING'
+    </update>
+
+    <update id="failScanRun">
+        UPDATE supervision_scan_run
+        SET status = 'FAILED',
+            finished_at = #{finishedAt},
+            failure_summary = #{failureSummary}
+        WHERE id = #{id}
+          AND status = 'RUNNING'
+    </update>
+
+    <update id="markStaleScanRunsFailed">
+        UPDATE supervision_scan_run
+        SET status = 'FAILED',
+            finished_at = #{finishedAt},
+            failure_summary = #{failureSummary}
+        WHERE status = 'RUNNING'
+          AND started_at &lt; #{staleBefore}
+    </update>
+
+    <select id="countRunningScanRuns" resultType="int">
+        SELECT COUNT(*)
+        FROM supervision_scan_run
+        WHERE status = 'RUNNING'
+    </select>
+
+    <select id="listScanRuns" resultType="map">
+        SELECT ssr.id,
+               ssr.trigger_source AS triggerSource,
+               ssr.status,
+               ssr.started_at AS startedAt,
+               ssr.finished_at AS finishedAt,
+               ssr.candidate_count AS candidateCount,
+               ssr.created_count AS createdCount,
+               ssr.failure_summary AS failureSummary,
+               ssr.operator_user_id AS operatorUserId,
+               u.display_name AS operatorName
+        FROM supervision_scan_run ssr
+        LEFT JOIN sys_user u ON u.id = ssr.operator_user_id
+        ORDER BY ssr.started_at DESC, ssr.id DESC
+        LIMIT #{limit}
+    </select>
+
     <sql id="alertViewColumns">
         sa.id,
         sa.school_id AS schoolId,
@@ -349,14 +459,17 @@
                saa.action_type AS actionType,
                saa.comment,
                saa.actor_id AS actorId,
-               u.display_name AS actorName,
+               CASE
+                   WHEN saa.actor_role = 'SYSTEM' THEN '系统任务'
+                   ELSE u.display_name
+               END AS actorName,
                saa.actor_role AS actorRole,
                saa.acted_at AS actedAt
         FROM supervision_alert_action saa
         JOIN supervision_alert sa
           ON sa.id = saa.alert_id
          AND sa.school_id = saa.school_id
-        JOIN sys_user u ON u.id = saa.actor_id
+        LEFT JOIN sys_user u ON u.id = saa.actor_id
         WHERE saa.alert_id = #{alertId}
           <if test="schoolId != null">
               AND saa.school_id = #{schoolId}

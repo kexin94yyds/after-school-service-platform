@@ -63,6 +63,8 @@ const correctionForm = reactive<{
   reason: '',
 })
 let initialized = false
+let leaveLoadVersion = 0
+let correctionLoadVersion = 0
 let sessionLoadVersion = 0
 let attendanceLoadVersion = 0
 
@@ -177,32 +179,46 @@ async function loadOfferings(): Promise<boolean> {
 }
 
 async function loadLeaves(): Promise<void> {
+  const requestVersion = ++leaveLoadVersion
+  const offeringId = selectedOfferingId.value || undefined
+  const status = leaveStatusFilter.value || undefined
   leaveLoading.value = true
   error.value = ''
   try {
-    leaveRequests.value = await leaveCorrectionApi.getLeaveRequests({
-      offeringId: selectedOfferingId.value || undefined,
-      status: leaveStatusFilter.value || undefined,
+    const rows = await leaveCorrectionApi.getLeaveRequests({
+      offeringId,
+      status,
     })
+    if (requestVersion === leaveLoadVersion) leaveRequests.value = rows
   } catch (loadError) {
-    error.value = getErrorMessage(loadError, '请假申请加载失败。')
+    if (requestVersion === leaveLoadVersion) {
+      error.value = getErrorMessage(loadError, '请假申请加载失败。')
+    }
   } finally {
-    leaveLoading.value = false
+    if (requestVersion === leaveLoadVersion) leaveLoading.value = false
   }
 }
 
 async function loadCorrections(): Promise<void> {
+  const requestVersion = ++correctionLoadVersion
+  const offeringId = selectedOfferingId.value || undefined
+  const status = correctionStatusFilter.value || undefined
   correctionLoading.value = true
   error.value = ''
   try {
-    corrections.value = await leaveCorrectionApi.getCorrections({
-      offeringId: selectedOfferingId.value || undefined,
-      status: correctionStatusFilter.value || undefined,
+    const rows = await leaveCorrectionApi.getCorrections({
+      offeringId,
+      status,
     })
+    if (requestVersion === correctionLoadVersion) corrections.value = rows
   } catch (loadError) {
-    error.value = getErrorMessage(loadError, '纠错申请加载失败。')
+    if (requestVersion === correctionLoadVersion) {
+      error.value = getErrorMessage(loadError, '纠错申请加载失败。')
+    }
   } finally {
-    correctionLoading.value = false
+    if (requestVersion === correctionLoadVersion) {
+      correctionLoading.value = false
+    }
   }
 }
 

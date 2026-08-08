@@ -33,6 +33,7 @@ const plans = ref<ServicePlan[]>([])
 const leaves = ref<LeaveRequest[]>([])
 const corrections = ref<AttendanceCorrection[]>([])
 const alerts = ref<SupervisionAlert[]>([])
+let loadVersion = 0
 
 const metrics = computed<DashboardMetric[]>(() => [
   {
@@ -155,50 +156,90 @@ const shortcuts = [
 ]
 
 async function load(): Promise<void> {
+  const requestVersion = ++loadVersion
   loading.value = true
   error.value = ''
-  try {
-    const [
-      classes,
-      teachers,
-      students,
-      courses,
-      offerings,
-      enrollments,
-      planItems,
-      leaveItems,
-      correctionItems,
-      alertItems,
-    ] =
-      await Promise.all([
-        organizationApi.getClasses(),
-        organizationApi.getTeachers(),
-        organizationApi.getStudents(),
-        courseApi.getCourses(),
-        courseApi.getOfferings(),
-        enrollmentApi.getEnrollments(),
-        academicApi.getServicePlans(),
-        leaveCorrectionApi.getLeaveRequests(),
-        leaveCorrectionApi.getCorrections(),
-        supervisionApi.list(),
-      ])
-    classCount.value = classes.length
-    teacherCount.value = teachers.length
-    studentCount.value = students.length
-    courseCount.value = courses.length
-    offeringCount.value = offerings.length
-    enrollmentCount.value = enrollments.filter(
+  const [
+    classResult,
+    teacherResult,
+    studentResult,
+    courseResult,
+    offeringResult,
+    enrollmentResult,
+    planResult,
+    leaveResult,
+    correctionResult,
+    alertResult,
+  ] = await Promise.allSettled([
+    organizationApi.getClasses(),
+    organizationApi.getTeachers(),
+    organizationApi.getStudents(),
+    courseApi.getCourses(),
+    courseApi.getOfferings(),
+    enrollmentApi.getEnrollments(),
+    academicApi.getServicePlans(),
+    leaveCorrectionApi.getLeaveRequests(),
+    leaveCorrectionApi.getCorrections(),
+    supervisionApi.list(),
+  ])
+  if (requestVersion !== loadVersion) return
+
+  const messages: string[] = []
+  if (classResult.status === 'fulfilled') classCount.value = classResult.value.length
+  else {
+    classCount.value = null
+    messages.push(getErrorMessage(classResult.reason, '班级数据加载失败。'))
+  }
+  if (teacherResult.status === 'fulfilled') teacherCount.value = teacherResult.value.length
+  else {
+    teacherCount.value = null
+    messages.push(getErrorMessage(teacherResult.reason, '教师数据加载失败。'))
+  }
+  if (studentResult.status === 'fulfilled') studentCount.value = studentResult.value.length
+  else {
+    studentCount.value = null
+    messages.push(getErrorMessage(studentResult.reason, '学生数据加载失败。'))
+  }
+  if (courseResult.status === 'fulfilled') courseCount.value = courseResult.value.length
+  else {
+    courseCount.value = null
+    messages.push(getErrorMessage(courseResult.reason, '课程数据加载失败。'))
+  }
+  if (offeringResult.status === 'fulfilled') offeringCount.value = offeringResult.value.length
+  else {
+    offeringCount.value = null
+    messages.push(getErrorMessage(offeringResult.reason, '开班数据加载失败。'))
+  }
+  if (enrollmentResult.status === 'fulfilled') {
+    enrollmentCount.value = enrollmentResult.value.filter(
       (item) => item.status === 'ENROLLED',
     ).length
-    plans.value = planItems
-    leaves.value = leaveItems
-    corrections.value = correctionItems
-    alerts.value = alertItems
-  } catch (loadError) {
-    error.value = getErrorMessage(loadError, '学校工作台加载失败。')
-  } finally {
-    loading.value = false
+  } else {
+    enrollmentCount.value = null
+    messages.push(getErrorMessage(enrollmentResult.reason, '报名数据加载失败。'))
   }
+  if (planResult.status === 'fulfilled') plans.value = planResult.value
+  else {
+    plans.value = []
+    messages.push(getErrorMessage(planResult.reason, '服务计划待办加载失败。'))
+  }
+  if (leaveResult.status === 'fulfilled') leaves.value = leaveResult.value
+  else {
+    leaves.value = []
+    messages.push(getErrorMessage(leaveResult.reason, '请假待办加载失败。'))
+  }
+  if (correctionResult.status === 'fulfilled') corrections.value = correctionResult.value
+  else {
+    corrections.value = []
+    messages.push(getErrorMessage(correctionResult.reason, '纠错待办加载失败。'))
+  }
+  if (alertResult.status === 'fulfilled') alerts.value = alertResult.value
+  else {
+    alerts.value = []
+    messages.push(getErrorMessage(alertResult.reason, '整改待办加载失败。'))
+  }
+  error.value = messages.join(' ')
+  loading.value = false
 }
 
 onMounted(load)

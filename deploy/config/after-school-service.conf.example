@@ -10,6 +10,14 @@ DB_URL='jdbc:mysql://db.example.internal:3306/after_school_service?connectionTim
 DB_USERNAME=after_school_app
 APP_CORS_ALLOWED_ORIGIN='https://after-school.example'
 
+# Automatic supervision scan. The cron is a Spring six-field expression and
+# must stay quoted because it contains spaces. Manual scans remain available
+# to regulator accounts even when the scheduled task is disabled.
+SUPERVISION_SCAN_ENABLED=true
+SUPERVISION_SCAN_CRON='0 0 2 * * *'
+SUPERVISION_SCAN_ZONE=Asia/Shanghai
+SUPERVISION_SCAN_STALE_AFTER=PT2H
+
 # The JVM reads JAVA_TOOL_OPTIONS automatically. ExitOnOutOfMemoryError lets
 # systemd restart a failed process instead of leaving a corrupted JVM alive.
 JAVA_TOOL_OPTIONS='-XX:MaxRAMPercentage=70.0 -XX:+ExitOnOutOfMemoryError -Dfile.encoding=UTF-8'

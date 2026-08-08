@@ -25,6 +25,7 @@ import {
 } from '@/api/academic'
 import { ApiClientError, getErrorMessage } from '@/api/http'
 import PageHeader from '@/components/PageHeader.vue'
+import { useLongFormGuard } from '@/composables/useLongFormGuard'
 import { useSessionStore } from '@/stores/session'
 import {
   combineDateAndTime,
@@ -65,6 +66,7 @@ const detailLoadVersion = ref(0)
 const rescheduleDialogVisible = ref(false)
 const editingSession = ref<AcademicSession | null>(null)
 const rescheduling = ref(false)
+const revertingAdjustmentId = ref<number | null>(null)
 const rescheduleError = ref('')
 const rescheduleForm = reactive<{
   sessionDate: string
@@ -78,6 +80,15 @@ const rescheduleForm = reactive<{
   endTime: '',
   roomId: null,
   reason: '',
+})
+const {
+  beforeClose: beforeRescheduleDialogClose,
+  captureBaseline: captureRescheduleBaseline,
+  requestClose: requestRescheduleDialogClose,
+} = useLongFormGuard({
+  visible: rescheduleDialogVisible,
+  saving: rescheduling,
+  snapshot: () => ({ ...rescheduleForm }),
 })
 
 const selectedOffering = computed(() =>
@@ -324,6 +335,7 @@ function openReschedule(lesson: AcademicSession): void {
     reason: '',
   })
   rescheduleError.value = ''
+  captureRescheduleBaseline()
   rescheduleDialogVisible.value = true
   syncQuery()
 }
@@ -409,6 +421,7 @@ async function submitReschedule(): Promise<void> {
       reason: rescheduleForm.reason.trim(),
     }
     await academicApi.reschedule(editingSession.value.id, payload)
+    captureRescheduleBaseline()
     rescheduleDialogVisible.value = false
     ElMessage.success('调课已生效，并写入调整记录')
     await loadDetails()
@@ -421,6 +434,56 @@ async function submitReschedule(): Promise<void> {
 
 function adjustmentRoute(adjustment: ScheduleAdjustment): string {
   return `${formatDate(adjustment.originalSessionDate)} ${formatTime(adjustment.originalStartTime)} → ${formatDate(adjustment.adjustedSessionDate)} ${formatTime(adjustment.adjustedStartTime)}`
+}
+
+function latestAppliedAdjustmentId(sessionId: number): number | null {
+  return (
+    adjustments.value.find(
+      (item) => item.sessionId === sessionId && item.status === 'APPLIED',
+    )?.id ?? null
+  )
+}
+
+function revertReason(adjustment: ScheduleAdjustment): string {
+  if (adjustment.status !== 'APPLIED') return '该调课记录已撤销'
+  if (latestAppliedAdjustmentId(adjustment.sessionId) !== adjustment.id) {
+    return '只能撤销同一课次当前最新的生效调课'
+  }
+  return ''
+}
+
+async function revertAdjustment(
+  adjustment: ScheduleAdjustment,
+): Promise<void> {
+  const reason = revertReason(adjustment)
+  if (reason) {
+    ElMessage.warning(reason)
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `课次将恢复为 ${formatDate(adjustment.originalSessionDate)} ${formatTime(adjustment.originalStartTime)}-${formatTime(adjustment.originalEndTime)} · ${adjustment.originalClassroom}。系统会重新校验学期、教师、教室、校历和全体在报学生冲突。`,
+      '确认撤销调课',
+      {
+        confirmButtonText: '确认撤销',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    )
+  } catch {
+    return
+  }
+
+  revertingAdjustmentId.value = adjustment.id
+  try {
+    await academicApi.revertScheduleAdjustment(adjustment.id)
+    ElMessage.success('调课已撤销，课次已恢复原安排')
+    await loadDetails()
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '撤销调课失败。'))
+  } finally {
+    revertingAdjustmentId.value = null
+  }
 }
 
 watch([selectedOfferingId, sessionFilter], () => {
@@ -640,13 +703,36 @@ onMounted(async () => {
             <div class="history-main">
               <header>
                 <strong>{{ adjustmentRoute(adjustment) }}</strong>
-                <el-tag
-                  effect="plain"
-                  size="small"
-                  :type="statusTagType(adjustment.status)"
-                >
-                  {{ statusLabel(adjustment.status) }}
-                </el-tag>
+                <div class="history-actions">
+                  <el-tag
+                    effect="plain"
+                    size="small"
+                    :type="statusTagType(adjustment.status)"
+                  >
+                    {{ statusLabel(adjustment.status) }}
+                  </el-tag>
+                  <el-tooltip
+                    :content="revertReason(adjustment) || '恢复这次调课前的课次安排'"
+                    placement="top"
+                  >
+                    <span>
+                      <el-button
+                        text
+                        type="warning"
+                        size="small"
+                        :loading="revertingAdjustmentId === adjustment.id"
+                        :disabled="
+                          Boolean(revertReason(adjustment)) ||
+                          (revertingAdjustmentId !== null &&
+                            revertingAdjustmentId !== adjustment.id)
+                        "
+                        @click="revertAdjustment(adjustment)"
+                      >
+                        撤销调课
+                      </el-button>
+                    </span>
+                  </el-tooltip>
+                </div>
               </header>
               <p>
                 {{ adjustment.originalClassroom }} →
@@ -673,6 +759,7 @@ onMounted(async () => {
       width="min(680px, calc(100vw - 32px))"
       destroy-on-close
       :close-on-click-modal="false"
+      :before-close="beforeRescheduleDialogClose"
     >
       <el-alert
         v-if="rescheduleError"
@@ -751,7 +838,9 @@ onMounted(async () => {
         </div>
       </el-form>
       <template #footer>
-        <el-button @click="rescheduleDialogVisible = false">取消</el-button>
+        <el-button :disabled="rescheduling" @click="requestRescheduleDialogClose">
+          取消
+        </el-button>
         <el-button
           type="primary"
           :loading="rescheduling"
@@ -876,6 +965,17 @@ onMounted(async () => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
+}
+
+.history-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.history-actions :deep(.el-button) {
+  margin-left: 0;
 }
 
 .history-main strong {

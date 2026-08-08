@@ -202,6 +202,15 @@ public interface AcademicMapper {
             @Param("startTime") LocalTime startTime,
             @Param("endTime") LocalTime endTime);
 
+    List<Long> lockActiveEnrollmentStudentIds(@Param("offeringId") long offeringId);
+
+    Long findStudentSessionConflict(
+            @Param("studentId") long studentId,
+            @Param("offeringId") long offeringId,
+            @Param("sessionDate") LocalDate sessionDate,
+            @Param("startTime") LocalTime startTime,
+            @Param("endTime") LocalTime endTime);
+
     int insertScheduleAdjustment(
             @Param("schoolId") long schoolId,
             @Param("sessionId") long sessionId,
@@ -225,12 +234,31 @@ public interface AcademicMapper {
             @Param("sessionDate") LocalDate sessionDate,
             @Param("startTime") LocalTime startTime,
             @Param("endTime") LocalTime endTime,
-            @Param("roomId") long roomId,
+            @Param("roomId") Long roomId,
             @Param("classroom") String classroom);
 
     Map<String, Object> findLatestScheduleAdjustment(
             @Param("sessionId") long sessionId,
             @Param("requestedBy") long requestedBy);
+
+    ScheduleAdjustmentResource findScheduleAdjustmentResource(
+            @Param("adjustmentId") long adjustmentId);
+
+    ScheduleAdjustmentResource lockScheduleAdjustmentResource(
+            @Param("adjustmentId") long adjustmentId,
+            @Param("schoolId") long schoolId);
+
+    ScheduleAdjustmentResource lockLatestAppliedScheduleAdjustment(
+            @Param("sessionId") long sessionId,
+            @Param("schoolId") long schoolId);
+
+    int markScheduleAdjustmentReverted(
+            @Param("adjustmentId") long adjustmentId,
+            @Param("schoolId") long schoolId);
+
+    Map<String, Object> findScheduleAdjustmentView(
+            @Param("adjustmentId") long adjustmentId,
+            @Param("schoolId") long schoolId);
 
     Long findRoomOfferingConflict(
             @Param("schoolId") long schoolId,

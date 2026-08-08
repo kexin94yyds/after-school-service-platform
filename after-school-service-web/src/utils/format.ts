@@ -97,6 +97,9 @@ const statusLabels: Record<string, string> = {
   OVERDUE_ATTENDANCE: '考勤逾期',
   OFFERING_NO_SESSIONS: '未生成课次',
   LOW_ATTENDANCE: '低出勤率',
+  RUNNING: '执行中',
+  SUCCESS: '成功',
+  FAILED: '失败',
   MALE: '男',
   FEMALE: '女',
   OTHER: '其他',
@@ -146,6 +149,9 @@ const statusTagTypes: Record<string, StatusTagType> = {
   REJECTED: 'danger',
   RETURNED: 'danger',
   OPEN: 'danger',
+  RUNNING: 'warning',
+  SUCCESS: 'success',
+  FAILED: 'danger',
 }
 
 export function statusTagType(value: unknown): StatusTagType {

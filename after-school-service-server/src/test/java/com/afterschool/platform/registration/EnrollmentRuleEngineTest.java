@@ -101,6 +101,21 @@ class EnrollmentRuleEngineTest {
     }
 
     @Test
+    void rejectsEnrollmentAfterAnActualFirstSessionWasMovedEarlierThanTheTemplate() {
+        offering.setStartDate(LocalDate.of(2026, 9, 15));
+        offering.setEnrollmentEnd(LocalDateTime.of(2026, 12, 31, 23, 59));
+
+        assertCode("ENROLLMENT_CLOSED_AFTER_START", () ->
+                rules.validate(
+                        student,
+                        offering,
+                        null,
+                        false,
+                        LocalDateTime.of(2026, 9, 10, 15, 0),
+                        LocalDateTime.of(2026, 9, 10, 16, 0)));
+    }
+
+    @Test
     void rejectsCancellationAfterFirstSessionStarts() {
         assertCode("CANCELLATION_CLOSED", () ->
                 rules.validateCancellation(

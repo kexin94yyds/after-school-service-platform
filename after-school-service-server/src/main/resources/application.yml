@@ -46,3 +46,9 @@ springdoc:
 app:
   cors:
     allowed-origin: ${APP_CORS_ALLOWED_ORIGIN:http://localhost:5173}
+  supervision:
+    scan:
+      enabled: ${SUPERVISION_SCAN_ENABLED:true}
+      cron: ${SUPERVISION_SCAN_CRON:0 0 2 * * *}
+      zone: ${SUPERVISION_SCAN_ZONE:Asia/Shanghai}
+      stale-after: ${SUPERVISION_SCAN_STALE_AFTER:PT2H}

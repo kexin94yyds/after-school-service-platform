@@ -47,4 +47,14 @@ describe('academic API paths', () => {
 
     expect(post).toHaveBeenCalledWith('/sessions/27/reschedule', payload)
   })
+
+  it('reverts one schedule adjustment through its audit record', async () => {
+    const post = vi.spyOn(http, 'post').mockResolvedValue({
+      data: { id: 31, status: 'REVERTED' },
+    })
+
+    await academicApi.revertScheduleAdjustment(31)
+
+    expect(post).toHaveBeenCalledWith('/schedule-adjustments/31/revert')
+  })
 })

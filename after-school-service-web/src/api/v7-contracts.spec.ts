@@ -34,6 +34,7 @@ describe('V7 API contracts', () => {
 
     await supervisionApi.list({ schoolId: 3, status: 'OPEN', type: '' })
     await supervisionApi.scan({ schoolId: 3, lowAttendanceThreshold: 0.8 })
+    await supervisionApi.scanRuns(100)
     await supervisionApi.transition(19, {
       targetStatus: 'ACKNOWLEDGED',
       comment: '学校已接收',
@@ -46,6 +47,9 @@ describe('V7 API contracts', () => {
     expect(post).toHaveBeenCalledWith('/supervision/alerts/scan', {
       schoolId: 3,
       lowAttendanceThreshold: 0.8,
+    })
+    expect(get).toHaveBeenCalledWith('/supervision/alerts/scan-runs', {
+      params: { limit: 100 },
     })
     expect(post).toHaveBeenCalledWith('/supervision/alerts/19/transition', {
       targetStatus: 'ACKNOWLEDGED',

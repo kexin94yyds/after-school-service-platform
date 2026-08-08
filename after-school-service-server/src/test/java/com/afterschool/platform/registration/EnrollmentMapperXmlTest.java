@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
 import java.util.Map;
 import org.apache.ibatis.builder.xml.XMLMapperBuilder;
 import org.apache.ibatis.mapping.BoundSql;
@@ -57,6 +58,53 @@ class EnrollmentMapperXmlTest {
                     .contains("withdrawn_by IS NOT NULL")
                     .contains("withdrawn_at IS NOT NULL");
         }
+    }
+
+    @Test
+    void actualFirstSessionUsesOnlyNonCanceledLessonSessions() throws Exception {
+        Configuration configuration = mapperConfiguration();
+        BoundSql boundSql = configuration
+                .getMappedStatement(EnrollmentMapper.class.getName()
+                        + ".findFirstValidSessionStart")
+                .getBoundSql(Map.of("offeringId", 20L));
+        String sql = boundSql.getSql().replaceAll("\\s+", " ").trim();
+
+        assertThat(sql)
+                .contains("MIN(TIMESTAMP(session_date, start_time))")
+                .contains("FROM lesson_session")
+                .contains("offering_id = ?")
+                .contains("status != 'CANCELED'");
+        assertThat(boundSql.getParameterMappings())
+                .extracting(mapping -> mapping.getProperty())
+                .containsExactly("offeringId");
+        assertThat(configuration
+                        .getMappedStatement(EnrollmentMapper.class.getName()
+                                + ".findFirstValidSessionStart")
+                        .getResultMaps()
+                        .getFirst()
+                        .getType())
+                .isEqualTo(LocalDateTime.class);
+    }
+
+    @Test
+    void scheduleConflictPrioritizesActualSessionsAndFallsBackOnlyForNoSessionOfferings()
+            throws Exception {
+        Configuration configuration = mapperConfiguration();
+        BoundSql boundSql = configuration
+                .getMappedStatement(EnrollmentMapper.class.getName()
+                        + ".countScheduleConflicts")
+                .getBoundSql(Map.of("studentId", 10L, "offeringId", 20L));
+        String sql = boundSql.getSql().replaceAll("\\s+", " ").trim();
+
+        assertThat(sql)
+                .contains("JOIN lesson_session candidate_session")
+                .contains("candidate_session.session_date = existing_session.session_date")
+                .contains("existing_session.status != 'CANCELED'")
+                .contains("candidate_session.status != 'CANCELED'")
+                .contains("NOT EXISTS")
+                .contains("WEEKDAY(existing_session.session_date) + 1")
+                .contains("WEEKDAY(candidate_session.session_date) + 1")
+                .contains("existing.week_day = candidate.week_day");
     }
 
     private Configuration mapperConfiguration() throws Exception {

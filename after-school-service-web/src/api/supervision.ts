@@ -53,9 +53,9 @@ export interface SupervisionAction {
   toStatus: AlertStatus
   actionType: string
   comment: string
-  actorId: number
+  actorId: number | null
   actorName: string
-  actorRole: 'REGULATOR' | 'SCHOOL_ADMIN'
+  actorRole: 'REGULATOR' | 'SCHOOL_ADMIN' | 'SYSTEM'
   actedAt: string
 }
 
@@ -75,12 +75,30 @@ export interface ScanRequest {
 }
 
 export interface ScanResult {
+  scanRunId: string
+  triggerSource: ScanTriggerSource
   candidateCount: number
   createdCount: number
   deduplicatedCount: number
   createdByType: Record<AlertType, number>
   scannedAt: string
   lowAttendanceThreshold: number
+}
+
+export type ScanTriggerSource = 'MANUAL' | 'SCHEDULED'
+export type ScanRunStatus = 'RUNNING' | 'SUCCESS' | 'FAILED'
+
+export interface SupervisionScanRun {
+  id: string
+  triggerSource: ScanTriggerSource
+  status: ScanRunStatus
+  startedAt: string
+  finishedAt?: string | null
+  candidateCount?: number | null
+  createdCount?: number | null
+  failureSummary?: string | null
+  operatorUserId?: number | null
+  operatorName?: string | null
 }
 
 export interface TransitionRequest {
@@ -101,6 +119,14 @@ export const supervisionApi = {
     const response = await http.post<ScanResult>(
       '/supervision/alerts/scan',
       payload,
+    )
+    return response.data
+  },
+
+  async scanRuns(limit = 50): Promise<SupervisionScanRun[]> {
+    const response = await http.get<SupervisionScanRun[]>(
+      '/supervision/alerts/scan-runs',
+      { params: { limit } },
     )
     return response.data
   },

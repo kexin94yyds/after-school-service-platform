@@ -1,5 +1,6 @@
 package com.afterschool.platform.academic;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
@@ -21,6 +22,8 @@ import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 class AcademicServiceTest {
 
@@ -308,6 +311,7 @@ class AcademicServiceTest {
         when(mapper.lockRoom(30, 1)).thenReturn(room);
         when(mapper.lockOffering(40, 1)).thenReturn(40L);
         when(mapper.lockSessionResource(100)).thenReturn(session);
+        when(mapper.lockActiveEnrollmentStudentIds(40)).thenReturn(List.of());
         when(mapper.findTeacherSessionConflict(
                         20,
                         100,
@@ -317,7 +321,7 @@ class AcademicServiceTest {
                 .thenReturn(null);
         when(mapper.findRoomSessionConflict(
                         1,
-                        30,
+                        30L,
                         100,
                         LocalDate.of(2026, 9, 9),
                         LocalTime.of(15, 0),
@@ -329,7 +333,7 @@ class AcademicServiceTest {
                         LocalDate.of(2026, 9, 9),
                         LocalTime.of(15, 0),
                         LocalTime.of(16, 0),
-                        30,
+                        30L,
                         "创客教室"))
                 .thenReturn(1);
         when(mapper.findLatestScheduleAdjustment(100, 8))
@@ -349,6 +353,7 @@ class AcademicServiceTest {
         locks.verify(mapper).lockTeacher(20, 1);
         locks.verify(mapper).lockRoom(30, 1);
         locks.verify(mapper).lockOffering(40, 1);
+        locks.verify(mapper).lockActiveEnrollmentStudentIds(40);
         locks.verify(mapper).lockSessionResource(100);
         locks.verify(mapper).insertScheduleAdjustment(
                 1,
@@ -361,7 +366,7 @@ class AcademicServiceTest {
                 LocalDate.of(2026, 9, 9),
                 LocalTime.of(15, 0),
                 LocalTime.of(16, 0),
-                30,
+                30L,
                 "创客教室",
                 "参加区级活动",
                 8,
@@ -372,7 +377,7 @@ class AcademicServiceTest {
                 LocalDate.of(2026, 9, 9),
                 LocalTime.of(15, 0),
                 LocalTime.of(16, 0),
-                30,
+                30L,
                 "创客教室");
     }
 
@@ -386,6 +391,7 @@ class AcademicServiceTest {
         when(mapper.lockRoom(30, 1)).thenReturn(room());
         when(mapper.lockOffering(40, 1)).thenReturn(40L);
         when(mapper.lockSessionResource(100)).thenReturn(session);
+        when(mapper.lockActiveEnrollmentStudentIds(40)).thenReturn(List.of());
         when(mapper.findTeacherSessionConflict(
                         20,
                         100,
@@ -429,6 +435,263 @@ class AcademicServiceTest {
                 "参加区级活动",
                 8,
                 NOW);
+    }
+
+    @Test
+    void rejectsRescheduleThatWouldCreateAnEnrolledStudentsActualCourseConflict() {
+        SessionResource session = session();
+        configureReschedulePrerequisites(session);
+        when(mapper.lockActiveEnrollmentStudentIds(40)).thenReturn(List.of(10L));
+        when(mapper.findTeacherSessionConflict(
+                        20,
+                        100,
+                        LocalDate.of(2026, 9, 9),
+                        LocalTime.of(15, 0),
+                        LocalTime.of(16, 0)))
+                .thenReturn(null);
+        when(mapper.findRoomSessionConflict(
+                        1,
+                        30,
+                        100,
+                        LocalDate.of(2026, 9, 9),
+                        LocalTime.of(15, 0),
+                        LocalTime.of(16, 0)))
+                .thenReturn(null);
+        when(mapper.findStudentSessionConflict(
+                        10,
+                        40,
+                        LocalDate.of(2026, 9, 9),
+                        LocalTime.of(15, 0),
+                        LocalTime.of(16, 0)))
+                .thenReturn(501L);
+
+        assertCode(
+                "STUDENT_SCHEDULE_CONFLICT",
+                () -> service.reschedule(100, rescheduleRequest()));
+
+        verify(mapper, never()).insertScheduleAdjustment(
+                1,
+                100,
+                session.getSessionDate(),
+                session.getStartTime(),
+                session.getEndTime(),
+                session.getRoomId(),
+                session.getClassroom(),
+                LocalDate.of(2026, 9, 9),
+                LocalTime.of(15, 0),
+                LocalTime.of(16, 0),
+                30,
+                "创客教室",
+                "参加区级活动",
+                8,
+                NOW);
+    }
+
+    @Test
+    void revertsTheLatestActiveAdjustmentAfterRevalidatingResourcesAndStudents() {
+        SessionResource current = adjustedSession();
+        ScheduleAdjustmentResource adjustment = adjustment("APPLIED");
+        configureRevertPrerequisites(current, adjustment);
+        when(mapper.lockLatestAppliedScheduleAdjustment(100, 1)).thenReturn(adjustment);
+        when(mapper.lockActiveEnrollmentStudentIds(40)).thenReturn(List.of());
+        when(mapper.findTeacherSessionConflict(
+                        20,
+                        100,
+                        LocalDate.of(2026, 9, 2),
+                        LocalTime.of(16, 30),
+                        LocalTime.of(17, 30)))
+                .thenReturn(null);
+        when(mapper.findRoomSessionConflict(
+                        1,
+                        30,
+                        100,
+                        LocalDate.of(2026, 9, 2),
+                        LocalTime.of(16, 30),
+                        LocalTime.of(17, 30)))
+                .thenReturn(null);
+        when(mapper.updateSessionSchedule(
+                        100,
+                        1,
+                        LocalDate.of(2026, 9, 2),
+                        LocalTime.of(16, 30),
+                        LocalTime.of(17, 30),
+                        30L,
+                        "创客教室"))
+                .thenReturn(1);
+        when(mapper.markScheduleAdjustmentReverted(900, 1)).thenReturn(1);
+        when(mapper.findScheduleAdjustmentView(900, 1)).thenReturn(Map.of("id", 900L));
+
+        service.revertScheduleAdjustment(900);
+
+        InOrder writes = inOrder(mapper);
+        writes.verify(mapper).lockTerm(1);
+        writes.verify(mapper).lockTeacher(20, 1);
+        writes.verify(mapper).lockRoom(30, 1);
+        writes.verify(mapper).lockOffering(40, 1);
+        writes.verify(mapper).lockActiveEnrollmentStudentIds(40);
+        writes.verify(mapper).lockSessionResource(100);
+        writes.verify(mapper).updateSessionSchedule(
+                100,
+                1,
+                LocalDate.of(2026, 9, 2),
+                LocalTime.of(16, 30),
+                LocalTime.of(17, 30),
+                30L,
+                "创客教室");
+        writes.verify(mapper).markScheduleAdjustmentReverted(900, 1);
+    }
+
+    @Test
+    void rejectsRevertingANonLatestActiveAdjustment() {
+        SessionResource current = adjustedSession();
+        ScheduleAdjustmentResource adjustment = adjustment("APPLIED");
+        ScheduleAdjustmentResource later = adjustment("APPLIED");
+        later.setId(901);
+        configureRevertPrerequisites(current, adjustment);
+        when(mapper.lockLatestAppliedScheduleAdjustment(100, 1)).thenReturn(later);
+
+        assertCode(
+                "SCHEDULE_ADJUSTMENT_NOT_LATEST",
+                () -> service.revertScheduleAdjustment(900));
+
+        verify(mapper, never()).updateSessionSchedule(
+                100,
+                1,
+                adjustment.getOriginalSessionDate(),
+                adjustment.getOriginalStartTime(),
+                adjustment.getOriginalEndTime(),
+                adjustment.getOriginalRoomId(),
+                adjustment.getOriginalClassroom());
+        verify(mapper, never()).markScheduleAdjustmentReverted(900, 1);
+    }
+
+    @Test
+    void rejectsRevertingAnAlreadyRevertedAdjustment() {
+        SessionResource current = adjustedSession();
+        ScheduleAdjustmentResource adjustment = adjustment("REVERTED");
+        configureRevertPrerequisites(current, adjustment);
+
+        assertCode(
+                "SCHEDULE_ADJUSTMENT_NOT_ACTIVE",
+                () -> service.revertScheduleAdjustment(900));
+
+        verify(mapper, never()).lockLatestAppliedScheduleAdjustment(100, 1);
+        verify(mapper, never()).markScheduleAdjustmentReverted(900, 1);
+    }
+
+    @Test
+    void rejectsRevertingWhenTheRestoredScheduleWouldConflictWithAnEnrolledStudent() {
+        SessionResource current = adjustedSession();
+        ScheduleAdjustmentResource adjustment = adjustment("APPLIED");
+        configureRevertPrerequisites(current, adjustment);
+        when(mapper.lockLatestAppliedScheduleAdjustment(100, 1)).thenReturn(adjustment);
+        when(mapper.lockActiveEnrollmentStudentIds(40)).thenReturn(List.of(10L));
+        when(mapper.findTeacherSessionConflict(
+                        20,
+                        100,
+                        LocalDate.of(2026, 9, 2),
+                        LocalTime.of(16, 30),
+                        LocalTime.of(17, 30)))
+                .thenReturn(null);
+        when(mapper.findRoomSessionConflict(
+                        1,
+                        30,
+                        100,
+                        LocalDate.of(2026, 9, 2),
+                        LocalTime.of(16, 30),
+                        LocalTime.of(17, 30)))
+                .thenReturn(null);
+        when(mapper.findStudentSessionConflict(
+                        10,
+                        40,
+                        LocalDate.of(2026, 9, 2),
+                        LocalTime.of(16, 30),
+                        LocalTime.of(17, 30)))
+                .thenReturn(501L);
+
+        assertCode(
+                "STUDENT_SCHEDULE_CONFLICT",
+                () -> service.revertScheduleAdjustment(900));
+
+        verify(mapper, never()).markScheduleAdjustmentReverted(900, 1);
+    }
+
+    @Test
+    void scheduleMutationsDeclareReadCommittedForDirectServiceCalls()
+            throws Exception {
+        Transactional reschedule = AcademicService.class
+                .getMethod(
+                        "reschedule",
+                        long.class,
+                        AcademicController.RescheduleRequest.class)
+                .getAnnotation(Transactional.class);
+        Transactional revert = AcademicService.class
+                .getMethod("revertScheduleAdjustment", long.class)
+                .getAnnotation(Transactional.class);
+
+        assertThat(reschedule).isNotNull();
+        assertThat(revert).isNotNull();
+        assertThat(reschedule.isolation()).isEqualTo(Isolation.READ_COMMITTED);
+        assertThat(revert.isolation()).isEqualTo(Isolation.READ_COMMITTED);
+    }
+
+    private void configureReschedulePrerequisites(SessionResource session) {
+        when(mapper.findSessionResource(100)).thenReturn(session);
+        when(currentUser.schoolScope(1L)).thenReturn(1L);
+        when(mapper.lockTerm(1)).thenReturn(term("ACTIVE"));
+        when(mapper.lockTeacher(20, 1)).thenReturn(20L);
+        when(mapper.lockRoom(30, 1)).thenReturn(room());
+        when(mapper.lockOffering(40, 1)).thenReturn(40L);
+        when(mapper.lockSessionResource(100)).thenReturn(session);
+    }
+
+    private void configureRevertPrerequisites(
+            SessionResource current, ScheduleAdjustmentResource adjustment) {
+        when(mapper.findScheduleAdjustmentResource(900)).thenReturn(adjustment);
+        when(currentUser.schoolScope(1L)).thenReturn(1L);
+        when(mapper.findSessionResource(100)).thenReturn(current);
+        when(mapper.lockTerm(1)).thenReturn(term("ACTIVE"));
+        when(mapper.lockTeacher(20, 1)).thenReturn(20L);
+        when(mapper.lockRoom(30, 1)).thenReturn(room());
+        when(mapper.lockOffering(40, 1)).thenReturn(40L);
+        when(mapper.lockSessionResource(100)).thenReturn(current);
+        when(mapper.lockScheduleAdjustmentResource(900, 1)).thenReturn(adjustment);
+    }
+
+    private AcademicController.RescheduleRequest rescheduleRequest() {
+        return new AcademicController.RescheduleRequest(
+                LocalDate.of(2026, 9, 9),
+                LocalTime.of(15, 0),
+                LocalTime.of(16, 0),
+                30,
+                "参加区级活动");
+    }
+
+    private SessionResource adjustedSession() {
+        SessionResource session = session();
+        session.setSessionDate(LocalDate.of(2026, 9, 9));
+        session.setStartTime(LocalTime.of(15, 0));
+        session.setEndTime(LocalTime.of(16, 0));
+        return session;
+    }
+
+    private ScheduleAdjustmentResource adjustment(String status) {
+        ScheduleAdjustmentResource adjustment = new ScheduleAdjustmentResource();
+        adjustment.setId(900);
+        adjustment.setSchoolId(1);
+        adjustment.setSessionId(100);
+        adjustment.setOriginalSessionDate(LocalDate.of(2026, 9, 2));
+        adjustment.setOriginalStartTime(LocalTime.of(16, 30));
+        adjustment.setOriginalEndTime(LocalTime.of(17, 30));
+        adjustment.setOriginalRoomId(30L);
+        adjustment.setOriginalClassroom("创客教室");
+        adjustment.setAdjustedSessionDate(LocalDate.of(2026, 9, 9));
+        adjustment.setAdjustedStartTime(LocalTime.of(15, 0));
+        adjustment.setAdjustedEndTime(LocalTime.of(16, 0));
+        adjustment.setAdjustedRoomId(30L);
+        adjustment.setAdjustedClassroom("创客教室");
+        adjustment.setStatus(status);
+        return adjustment;
     }
 
     private AcademicTerm term(String status) {
