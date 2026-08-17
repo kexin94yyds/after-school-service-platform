@@ -49,6 +49,14 @@ public class EnrollmentRuleEngine {
         if (!"ACTIVE".equals(offering.getCourseStatus())) {
             throw ApiException.conflict("COURSE_INACTIVE", "该课程已停用，不能继续报名");
         }
+        if (isClosedStatus(offering.getTermStatus())) {
+            throw ApiException.conflict(
+                    "TERM_CLOSED", "开班所属学期已结束或归档，不能报名");
+        }
+        if (isClosedStatus(offering.getPlanStatus())) {
+            throw ApiException.conflict(
+                    "SERVICE_PLAN_CLOSED", "开班所属服务计划已结束或归档，不能报名");
+        }
         if (now.isBefore(offering.getEnrollmentStart()) || now.isAfter(offering.getEnrollmentEnd())) {
             throw ApiException.conflict("OUTSIDE_ENROLLMENT_WINDOW", "当前不在报名开放时间内");
         }
@@ -94,5 +102,9 @@ public class EnrollmentRuleEngine {
             firstSessionDate = firstSessionDate.plusDays(1);
         }
         return LocalDateTime.of(firstSessionDate, offering.getStartTime());
+    }
+
+    private boolean isClosedStatus(String status) {
+        return "CLOSED".equals(status) || "ARCHIVED".equals(status);
     }
 }

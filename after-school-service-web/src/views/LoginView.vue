@@ -56,13 +56,13 @@ function normalizeFieldErrors(
 }
 
 async function submit(): Promise<void> {
+  if (submitting.value) return
+  submitting.value = true
   loginError.value = ''
   fieldErrors.value = {}
-  const valid = await formRef.value?.validate().catch(() => false)
-  if (!valid) return
-
-  submitting.value = true
   try {
+    const valid = await formRef.value?.validate().catch(() => false)
+    if (!valid) return
     const user = await session.signIn(form.username.trim(), form.password)
     await router.replace(safeRedirect(user.role))
   } catch (error) {
@@ -144,6 +144,7 @@ async function submit(): Promise<void> {
           >
             <el-input
               v-model="form.username"
+              :disabled="submitting"
               autocomplete="username"
               placeholder="请输入登录账号"
               autofocus
@@ -156,11 +157,11 @@ async function submit(): Promise<void> {
           >
             <el-input
               v-model="form.password"
+              :disabled="submitting"
               type="password"
               autocomplete="current-password"
               placeholder="请输入登录密码"
               show-password
-              @keyup.enter="submit"
             />
           </el-form-item>
           <el-button

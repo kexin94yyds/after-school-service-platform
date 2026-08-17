@@ -105,6 +105,11 @@ public class CourseService {
 
     @Transactional
     public Map<String, Object> createOffering(CourseController.OfferingRequest request) {
+        if (!"DRAFT".equals(request.status())) {
+            throw ApiException.badRequest(
+                    "INITIAL_OFFERING_STATUS_INVALID",
+                    "新建开班状态必须为草稿");
+        }
         validateOffering(request);
         long schoolId = currentUser.schoolScope(request.schoolId());
         AcademicReferences academic = lockAcademicReferences(schoolId, request);
@@ -129,7 +134,7 @@ public class CourseService {
                 request.enrollmentEnd(),
                 request.capacity(),
                 classroom,
-                request.status(),
+                "DRAFT",
                 request.termId(),
                 request.planId(),
                 request.roomId());

@@ -13,7 +13,7 @@
 - 外部告警渠道；
 - [check-production.sh](../scripts/check-production.sh) 全部通过。
 
-基线目标为每日一次全量备份、RPO 不超过 24 小时、保留 30 天。RTO 目标为 4 小时，但只有在使用接近生产数据量的恢复演练后才能标记为已验证；必须记录备份大小、恢复开始/结束时间、校验结果和演练人员。
+基线目标为每日两次全量备份、RPO 不超过 24 小时、保留 30 天。备份 timer 在 `00:15` 与 `12:15` 运行，随机延迟最多 15 分钟；健康检查在目标库备份超过 18 小时、缺少或校验失败时告警，给值班人员预留约 6 小时的修复窗口。RTO 目标为 4 小时，但只有在使用接近生产数据量的恢复演练后才能标记为已验证；必须记录备份大小、恢复开始/结束时间、校验结果和演练人员。
 
 ## 2. 主机和账号
 
@@ -34,7 +34,7 @@
 /var/backups/after-school-service/     after-school-backup 私有目录
 ```
 
-JAR 和前端发布目录只允许 root 写入。后端服务用户只能读取当前 JAR；备份用户只能写备份目录和自己的 systemd 状态目录。
+JAR 和前端发布目录只允许 root 写入。后端服务用户只能读取当前 JAR；备份用户只能写备份目录和自己的 systemd 状态目录。生产 JAR 必须不含 demo 的迁移、profile 配置和刷新组件；`scripts/install-server-release.sh` 会拒绝含任一演示 payload 或以 `-demo.jar` 命名的构件。演示 JAR 只允许在隔离的本机 demo 环境中由 `scripts/run-demo.sh` 使用，禁止复制到生产 release 目录。
 
 ## 3. 应用配置与数据库密码
 
@@ -141,13 +141,13 @@ sudo journalctl -u after-school-backup.service --since today
   /secure/age-identity.txt
 ```
 
-目标库必须不存在。脚本会校验 checksum、解密、导入并检查表和 Flyway 历史；失败只清理它刚创建的部分库。
+目标库必须不存在。脚本会校验 checksum、解密、导入，并确认 Flyway 历史没有失败记录且至少成功应用 V13，确认 11 张核心业务表、关键报名租户外键及 `supervision_alert → supervision_scan_run` 外键均存在，并确认没有预警扫描运行孤儿记录；失败只清理它刚创建的部分库。升级到未来迁移版本后，在恢复演练命令中设置 `RESTORE_REQUIRED_FLYWAY_VERSION` 为当前发布要求的版本，不得降低生产基线。
 
 恢复成功后，用恢复库启动一个不对公网开放的应用实例，执行登录、报名、考勤、请假、监管报表只读抽查，再记录实际 RTO。演练完成前不得把问题状态标为已验证。
 
 ## 9. 健康监测与外部告警
 
-安装 healthcheck service、timer 和 [after-school-monitor.conf.example](../deploy/config/after-school-monitor.conf.example)。timer 每 5 分钟检查服务、数据库 readiness、备份 timer、备份新鲜度和最近一次 backup service 是否失败。因此异机上传 hook 失败不会被已经生成的本地新备份掩盖。
+安装 healthcheck service、timer 和 [after-school-monitor.conf.example](../deploy/config/after-school-monitor.conf.example)。`MYSQL_DATABASE` 必须与备份 unit 中的目标库一致；timer 每 5 分钟检查服务、数据库 readiness、备份 timer、该目标库备份的新鲜度、相邻 SHA-256 的格式与实际摘要，以及最近一次 backup service 是否失败。因此别的数据库生成的备份、伪造/损坏 checksum 或异机上传 hook 失败都不会被新的无关文件掩盖。`BACKUP_MAX_AGE_HOURS=18` 与每天两次备份一起实现 RPO ≤ 24 小时的可告警缓冲，按 5 分钟检查周期折算约有 6 小时处置时间。
 
 `HEALTH_ALERT_HOOK` 必须是 root 拥有且不可被组或其他用户写入的本地可执行文件。它只接收状态和短消息。接入邮件、企业微信或其他平台后，必须主动制造一次失败并恢复，确认收到一条 FAILED 和一条 RECOVERED。
 

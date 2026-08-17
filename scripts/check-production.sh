@@ -4,7 +4,7 @@ set -Eeuo pipefail
 
 usage() {
   cat >&2 <<'EOF'
-Usage: check-production.sh <https-origin> <tls-certificate.pem> [backup-dir] [server-root]
+Usage: check-production.sh <https-origin> <tls-certificate.pem> [backup-dir] [server-root] [mysql-database]
 
 Run on the Ubuntu production or staging host after units and releases are
 installed. The origin must not contain a path or trailing slash.
@@ -21,11 +21,12 @@ pass() {
   printf 'check-production: PASS - %s\n' "$1"
 }
 
-[[ "$#" -ge 2 && "$#" -le 4 ]] || usage
+[[ "$#" -ge 2 && "$#" -le 5 ]] || usage
 public_origin="$1"
 tls_certificate="$2"
 backup_dir="${3:-/var/backups/after-school-service}"
 server_root="${4:-/opt/after-school-service}"
+backup_database="${5:-${MYSQL_DATABASE:-after_school_service}}"
 
 [[ "${public_origin}" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?$ ]] \
   || fail "public origin must be an HTTPS origin without path or trailing slash"
@@ -35,6 +36,8 @@ server_root="${4:-/opt/after-school-service}"
   || fail "backup directory must be a specific absolute directory"
 [[ "${server_root}" == /* && "${server_root}" != "/" ]] \
   || fail "server root must be a specific absolute directory"
+[[ "${backup_database}" =~ ^[A-Za-z0-9_]{1,64}$ ]] \
+  || fail "MySQL database must contain only letters, digits and underscore"
 
 [[ -r /etc/os-release ]] || fail "cannot identify the operating system"
 os_id="$(sed -n 's/^ID=//p' /etc/os-release | tr -d '"')"
@@ -133,15 +136,47 @@ curl --fail --silent --show-error --max-time 5 \
   || fail "local Prometheus metrics are unavailable"
 pass "local liveness, readiness and Prometheus metrics"
 
+latest_database_backup() {
+  local candidate=""
+  local latest=""
+  while IFS= read -r -d '' candidate; do
+    if [[ -z "${latest}" || "${candidate}" > "${latest}" ]]; then
+      latest="${candidate}"
+    fi
+  done < <(find "${backup_dir}" -mindepth 1 -maxdepth 1 -type f \
+      -name "${backup_database}-*.sql.gz.age" -mmin -1080 -print0)
+  printf '%s' "${latest}"
+}
+
+verify_backup_checksum() {
+  local backup_path="$1"
+  local checksum_path="${backup_path}.sha256"
+  local backup_name="$(basename -- "${backup_path}")"
+  local checksum_name="$(basename -- "${checksum_path}")"
+  local checksum_record=""
+  local expected_length=0
+  local checksum_digest=""
+  local checksum_target=""
+
+  [[ -s "${checksum_path}" && ! -L "${checksum_path}" ]] || return 1
+  checksum_record="$(<"${checksum_path}")"
+  expected_length=$((66 + ${#backup_name}))
+  [[ "${#checksum_record}" -eq "${expected_length}" ]] || return 1
+  checksum_digest="${checksum_record:0:64}"
+  checksum_target="${checksum_record:66}"
+  [[ "${checksum_digest}" =~ ^[[:xdigit:]]{64}$ \
+      && "${checksum_record:64:2}" == "  " \
+      && "${checksum_target}" == "${backup_name}" ]] || return 1
+  (cd "${backup_dir}" && sha256sum --check --status "${checksum_name}")
+}
+
 [[ -d "${backup_dir}" ]] || fail "backup directory does not exist"
-latest_backup="$(find "${backup_dir}" -mindepth 1 -maxdepth 1 -type f \
-  -name '*.sql.gz.age' -mmin -2160 -print | sort | tail -n 1)"
-[[ -n "${latest_backup}" && -s "${latest_backup}.sha256" ]] \
-  || fail "no encrypted backup with checksum was created in the last 36 hours"
-(cd "${backup_dir}" && sha256sum --check --status \
-  "$(basename -- "${latest_backup}.sha256")") \
-  || fail "latest encrypted backup checksum failed"
-pass "recent encrypted backup and checksum"
+latest_backup="$(latest_database_backup)"
+[[ -n "${latest_backup}" ]] \
+  || fail "no ${backup_database} encrypted backup was created in the last 18 hours"
+verify_backup_checksum "${latest_backup}" \
+  || fail "latest ${backup_database} encrypted backup checksum failed or is malformed"
+pass "recent ${backup_database} encrypted backup and checksum"
 
 openssl x509 -in "${tls_certificate}" -noout -checkend 2592000 \
   || fail "TLS certificate expires within 30 days"

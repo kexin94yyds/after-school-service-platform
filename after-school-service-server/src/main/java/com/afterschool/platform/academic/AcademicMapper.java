@@ -17,6 +17,8 @@ public interface AcademicMapper {
 
     AcademicTerm lockTerm(@Param("id") long id);
 
+    List<Long> lockTermOfferings(@Param("termId") long termId);
+
     int insertTerm(
             @Param("termCode") String termCode,
             @Param("termName") String termName,
@@ -48,6 +50,8 @@ public interface AcademicMapper {
     ServicePlan lockServicePlan(
             @Param("id") long id,
             @Param("schoolId") long schoolId);
+
+    List<Long> lockPlanOfferings(@Param("planId") long planId);
 
     int insertServicePlan(
             @Param("schoolId") long schoolId,

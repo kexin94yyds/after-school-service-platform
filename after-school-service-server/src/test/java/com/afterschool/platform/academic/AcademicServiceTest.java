@@ -51,6 +51,49 @@ class AcademicServiceTest {
     }
 
     @Test
+    void createsEveryNewTermInDraftState() {
+        AcademicController.TermRequest request = new AcademicController.TermRequest(
+                "2026-FALL",
+                "2026 秋季学期",
+                LocalDate.of(2026, 9, 1),
+                LocalDate.of(2027, 1, 31),
+                "DRAFT");
+        when(mapper.findTermByCode("2026-FALL"))
+                .thenReturn(Map.of("id", 1L, "status", "DRAFT"));
+
+        Map<String, Object> created = service.createTerm(request);
+
+        assertThat(created).containsEntry("status", "DRAFT");
+        verify(mapper).insertTerm(
+                "2026-FALL",
+                "2026 秋季学期",
+                request.startDate(),
+                request.endDate(),
+                "DRAFT",
+                8L);
+    }
+
+    @Test
+    void rejectsCreatingTermInAnyNonDraftState() {
+        AcademicController.TermRequest request = new AcademicController.TermRequest(
+                "2026-FALL",
+                "2026 秋季学期",
+                LocalDate.of(2026, 9, 1),
+                LocalDate.of(2027, 1, 31),
+                "CLOSED");
+
+        assertCode("INITIAL_TERM_STATUS_INVALID", () -> service.createTerm(request));
+
+        verify(mapper, never()).insertTerm(
+                "2026-FALL",
+                "2026 秋季学期",
+                request.startDate(),
+                request.endDate(),
+                "CLOSED",
+                8L);
+    }
+
+    @Test
     void rejectsSkippedTermTransition() {
         AcademicTerm term = term("DRAFT");
         when(mapper.lockTerm(1)).thenReturn(term);
@@ -73,6 +116,67 @@ class AcademicServiceTest {
                 request.startDate(),
                 request.endDate(),
                 "CLOSED");
+    }
+
+    @Test
+    void closingTermLocksAssociatedOfferingsAfterTermBeforeUpdatingStatus() {
+        AcademicTerm term = term("ACTIVE");
+        AcademicController.TermRequest request = new AcademicController.TermRequest(
+                "2026-FALL",
+                "2026 秋季学期",
+                LocalDate.of(2026, 9, 1),
+                LocalDate.of(2027, 1, 31),
+                "CLOSED");
+        when(mapper.lockTerm(1)).thenReturn(term);
+        when(mapper.updateTerm(
+                        1,
+                        "2026-FALL",
+                        "2026 秋季学期",
+                        request.startDate(),
+                        request.endDate(),
+                        "CLOSED"))
+                .thenReturn(1);
+        when(mapper.findTermByCode("2026-FALL"))
+                .thenReturn(Map.of("id", 1L, "status", "CLOSED"));
+
+        service.updateTerm(1, request);
+
+        InOrder writes = inOrder(mapper);
+        writes.verify(mapper).lockTerm(1);
+        writes.verify(mapper).lockTermOfferings(1);
+        writes.verify(mapper).updateTerm(
+                1,
+                "2026-FALL",
+                "2026 秋季学期",
+                request.startDate(),
+                request.endDate(),
+                "CLOSED");
+    }
+
+    @Test
+    void reapplyingTerminalTermStatusDoesNotLockAssociatedOfferings() {
+        AcademicTerm term = term("CLOSED");
+        AcademicController.TermRequest request = new AcademicController.TermRequest(
+                "2026-FALL",
+                "2026 秋季学期",
+                LocalDate.of(2026, 9, 1),
+                LocalDate.of(2027, 1, 31),
+                "CLOSED");
+        when(mapper.lockTerm(1)).thenReturn(term);
+        when(mapper.updateTerm(
+                        1,
+                        "2026-FALL",
+                        "2026 秋季学期",
+                        request.startDate(),
+                        request.endDate(),
+                        "CLOSED"))
+                .thenReturn(1);
+        when(mapper.findTermByCode("2026-FALL"))
+                .thenReturn(Map.of("id", 1L, "status", "CLOSED"));
+
+        service.updateTerm(1, request);
+
+        verify(mapper, never()).lockTermOfferings(1);
     }
 
     @Test
@@ -153,6 +257,44 @@ class AcademicServiceTest {
                 () -> service.transitionServicePlan(
                         10,
                         new AcademicController.PlanTransitionRequest("ACTIVE", null)));
+    }
+
+    @Test
+    void closingPlanLocksAssociatedOfferingsAfterTermAndPlan() {
+        ServicePlan plan = plan("ACTIVE");
+        when(mapper.findServicePlan(10)).thenReturn(plan);
+        when(currentUser.schoolScope(1L)).thenReturn(1L);
+        when(mapper.lockTerm(1)).thenReturn(term("ACTIVE"));
+        when(mapper.lockServicePlan(10, 1)).thenReturn(plan);
+        when(principal.roleCode()).thenReturn("REGULATOR");
+        when(mapper.transitionServicePlan(
+                        10,
+                        1,
+                        "ACTIVE",
+                        "CLOSED",
+                        null,
+                        8,
+                        NOW))
+                .thenReturn(1);
+        when(mapper.findServicePlanByCode(1, "PLAN-2026-FALL"))
+                .thenReturn(Map.of("id", 10L, "status", "CLOSED"));
+
+        service.transitionServicePlan(
+                10,
+                new AcademicController.PlanTransitionRequest("CLOSED", null));
+
+        InOrder writes = inOrder(mapper);
+        writes.verify(mapper).lockTerm(1);
+        writes.verify(mapper).lockServicePlan(10, 1);
+        writes.verify(mapper).lockPlanOfferings(10);
+        writes.verify(mapper).transitionServicePlan(
+                10,
+                1,
+                "ACTIVE",
+                "CLOSED",
+                null,
+                8,
+                NOW);
     }
 
     @Test

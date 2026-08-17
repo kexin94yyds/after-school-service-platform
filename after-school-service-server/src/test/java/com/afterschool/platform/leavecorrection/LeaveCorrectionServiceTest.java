@@ -190,6 +190,18 @@ class LeaveCorrectionServiceTest {
     }
 
     @Test
+    void rejectingLeaveRequiresANonBlankReason() {
+        assertCode(
+                "LEAVE_REJECTION_REASON_REQUIRED",
+                () -> service.reviewLeave(
+                        50,
+                        new LeaveCorrectionController.LeaveReview(
+                                "REJECTED", "  ")));
+
+        verify(mapper, never()).findLeaveRecord(50);
+    }
+
+    @Test
     void schoolAdminCanReviewPendingLeaveInOwnSchool() {
         LeaveRequestRecord initial = leaveRecord("PENDING");
         when(mapper.findLeaveRecord(50)).thenReturn(initial);
@@ -354,6 +366,18 @@ class LeaveCorrectionServiceTest {
         verify(mapper, never())
                 .updateAttendanceFromCorrection(
                         anyLong(), any(), any(), anyLong());
+    }
+
+    @Test
+    void rejectingCorrectionRequiresANonBlankReason() {
+        assertCode(
+                "CORRECTION_REJECTION_REASON_REQUIRED",
+                () -> service.reviewCorrection(
+                        60,
+                        new LeaveCorrectionController.CorrectionReview(
+                                "REJECTED", null)));
+
+        verify(mapper, never()).findCorrectionRecord(60);
     }
 
     @Test

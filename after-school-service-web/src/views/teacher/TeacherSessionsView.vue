@@ -57,6 +57,8 @@ const generating = ref(false)
 const saving = ref(false)
 const sessionDialogVisible = ref(false)
 const sessionSaving = ref(false)
+const sessionConfirming = ref(false)
+const sessionInitialStatus = ref<SessionStatus>('SCHEDULED')
 const error = ref('')
 let sessionsRequestVersion = 0
 let attendanceRequestVersion = 0
@@ -103,6 +105,9 @@ const attendanceDirty = computed(
     attendanceSessionId.value === selectedSessionId.value &&
     attendanceDraftSignature(attendance.value) !==
       attendanceBaselineSignature.value,
+)
+const sessionBusy = computed(
+  () => sessionSaving.value || sessionConfirming.value,
 )
 
 function clearAttendanceDraft(): void {
@@ -352,12 +357,42 @@ async function generateSessions(): Promise<void> {
 function openSessionEditor(): void {
   if (!selectedSession.value) return
   sessionForm.status = selectedSession.value.status
+  sessionInitialStatus.value = selectedSession.value.status
   sessionForm.notes = selectedSession.value.notes ?? ''
   sessionDialogVisible.value = true
 }
 
+function closeSessionEditor(): void {
+  if (!sessionBusy.value) sessionDialogVisible.value = false
+}
+
+function beforeSessionEditorClose(done: () => void): void {
+  if (!sessionBusy.value) done()
+}
+
 async function saveSession(): Promise<void> {
-  if (!selectedSessionId.value) return
+  if (!selectedSessionId.value || sessionBusy.value) return
+  if (
+    sessionForm.status === 'CANCELED' &&
+    sessionInitialStatus.value !== 'CANCELED'
+  ) {
+    sessionConfirming.value = true
+    try {
+      await ElMessageBox.confirm(
+        '取消课次后，该课次将不能再登记考勤。请确认已完成必要的通知与安排。',
+        '确认取消课次',
+        {
+          confirmButtonText: '确认取消',
+          cancelButtonText: '继续编辑',
+          type: 'warning',
+        },
+      )
+    } catch {
+      return
+    } finally {
+      sessionConfirming.value = false
+    }
+  }
   sessionSaving.value = true
   try {
     const updated = await teachingApi.updateSession(
@@ -760,8 +795,15 @@ onBeforeUnmount(() => {
       title="编辑课次"
       width="min(520px, calc(100vw - 32px))"
       :close-on-click-modal="false"
+      :close-on-press-escape="!sessionBusy"
+      :show-close="!sessionBusy"
+      :before-close="beforeSessionEditorClose"
     >
-      <el-form label-position="top" @submit.prevent="saveSession">
+      <el-form
+        label-position="top"
+        :disabled="sessionBusy"
+        @submit.prevent="saveSession"
+      >
         <el-form-item label="课次状态" required>
           <el-select v-model="sessionForm.status">
             <el-option
@@ -787,8 +829,10 @@ onBeforeUnmount(() => {
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="sessionDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="sessionSaving" @click="saveSession">
+        <el-button :disabled="sessionBusy" @click="closeSessionEditor">
+          取消
+        </el-button>
+        <el-button type="primary" :loading="sessionBusy" @click="saveSession">
           保存
         </el-button>
       </template>

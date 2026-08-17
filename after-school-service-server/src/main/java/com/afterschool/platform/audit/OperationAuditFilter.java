@@ -114,6 +114,7 @@ public class OperationAuditFilter extends OncePerRequestFilter {
                     request.getMethod(),
                     request.getRequestURI(),
                     exception);
+            invalidateFailedLoginSession(request);
             if (response.isCommitted()) {
                 throw exception;
             }
@@ -136,6 +137,28 @@ public class OperationAuditFilter extends OncePerRequestFilter {
             return principal;
         }
         return null;
+    }
+
+    private void invalidateFailedLoginSession(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        String contextPath = request.getContextPath();
+        if (contextPath != null
+                && !contextPath.isEmpty()
+                && path.startsWith(contextPath)) {
+            path = path.substring(contextPath.length());
+        }
+        if (!"/api/auth/login".equals(path)) {
+            return;
+        }
+        // The login controller saves a new security context before this
+        // mandatory audit insert runs.  If it fails, discard only that newly
+        // authenticated session.  Other business writes must roll back and
+        // return 500 without unexpectedly signing out the current user.
+        SecurityContextHolder.clearContext();
+        jakarta.servlet.http.HttpSession session = request.getSession(false);
+        if (session != null) {
+            session.invalidate();
+        }
     }
 
     static String sourceFingerprint(HttpServletRequest request) {

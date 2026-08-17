@@ -90,6 +90,13 @@ public class EnrollmentService {
         if (offering == null) {
             throw ApiException.notFound("开班不存在");
         }
+        // Keep the exclusive offering/course lock narrow. Parent statuses are
+        // read only after that lock has been acquired, so closing a term or
+        // plan can lock parent -> offerings without a reverse lock edge.
+        EnrollmentOffering currentOffering = mapper.findOffering(request.offeringId());
+        if (currentOffering == null) {
+            throw ApiException.notFound("开班不存在");
+        }
         EnrollmentStudent student = mapper.lockGuardianStudent(request.studentId(), guardianId);
         if (student == null) {
             throw ApiException.notFound("学生不存在或未与当前家长绑定");
@@ -101,10 +108,10 @@ public class EnrollmentService {
                 mapper.countScheduleConflicts(request.studentId(), request.offeringId()) > 0;
         rules.validate(
                 student,
-                offering,
+                currentOffering,
                 existing,
                 conflict,
-                effectiveFirstSessionStart(offering),
+                effectiveFirstSessionStart(currentOffering),
                 LocalDateTime.now(clock));
 
         if (mapper.incrementCapacity(request.offeringId()) != 1) {

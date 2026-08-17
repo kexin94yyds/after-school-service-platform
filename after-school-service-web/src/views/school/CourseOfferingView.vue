@@ -213,6 +213,9 @@ const availableStatuses = computed<Array<{
   label: string
   value: OfferingStatus
 }>>(() => {
+  if (editingOffering.value === null) {
+    return [{ value: 'DRAFT', label: statusLabel('DRAFT') }]
+  }
   const status = editingOffering.value?.status ?? 'DRAFT'
   const targets: Record<OfferingStatus, OfferingStatus[]> = {
     DRAFT: ['DRAFT', 'PUBLISHED', 'CANCELED'],

@@ -34,6 +34,11 @@ function close(): void {
   if (!saving.value) emit('update:modelValue', false)
 }
 
+function handleVisibilityChange(visible: boolean): void {
+  if (!visible && saving.value) return
+  emit('update:modelValue', visible)
+}
+
 function validate(): boolean {
   const errors: Record<string, string> = {}
   if (!form.currentPassword) {
@@ -63,6 +68,7 @@ function normalizeFieldErrors(
 }
 
 async function submit(): Promise<void> {
+  if (saving.value) return
   dialogError.value = ''
   if (!validate()) return
   saving.value = true
@@ -99,7 +105,8 @@ watch(
     destroy-on-close
     :close-on-click-modal="false"
     :close-on-press-escape="!saving"
-    @update:model-value="$emit('update:modelValue', $event)"
+    :show-close="!saving"
+    @update:model-value="handleVisibilityChange"
   >
     <el-alert
       v-if="dialogError"
@@ -117,6 +124,7 @@ watch(
       >
         <el-input
           v-model="form.currentPassword"
+          :disabled="saving"
           type="password"
           autocomplete="current-password"
           show-password
@@ -130,6 +138,7 @@ watch(
       >
         <el-input
           v-model="form.newPassword"
+          :disabled="saving"
           type="password"
           autocomplete="new-password"
           show-password
@@ -146,6 +155,7 @@ watch(
       >
         <el-input
           v-model="form.confirmPassword"
+          :disabled="saving"
           type="password"
           autocomplete="new-password"
           show-password

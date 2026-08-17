@@ -116,6 +116,12 @@ public class LeaveCorrectionService {
             throw ApiException.badRequest(
                     "INVALID_LEAVE_DECISION", "请假审核决定无效");
         }
+        String reviewRemark = trimToNull(request.remark());
+        if ("REJECTED".equals(request.decision()) && reviewRemark == null) {
+            throw ApiException.badRequest(
+                    "LEAVE_REJECTION_REASON_REQUIRED",
+                    "驳回请假时必须填写原因");
+        }
         LeaveRequestRecord initial = mapper.findLeaveRecord(id);
         if (initial == null) {
             throw ApiException.notFound("请假申请不存在");
@@ -155,7 +161,7 @@ public class LeaveCorrectionService {
         if (mapper.reviewLeave(
                         id,
                         request.decision(),
-                        trimToNull(request.remark()),
+                        reviewRemark,
                         principal.id())
                 != 1) {
             throw ApiException.conflict("LEAVE_CHANGED", "请假状态已变化，请刷新后重试");
@@ -286,6 +292,12 @@ public class LeaveCorrectionService {
             throw ApiException.badRequest(
                     "INVALID_CORRECTION_DECISION", "纠错审批决定无效");
         }
+        String reviewRemark = trimToNull(request.remark());
+        if ("REJECTED".equals(request.decision()) && reviewRemark == null) {
+            throw ApiException.badRequest(
+                    "CORRECTION_REJECTION_REASON_REQUIRED",
+                    "驳回考勤纠错时必须填写原因");
+        }
         PlatformPrincipal principal = currentUser.principal();
         if (!"SCHOOL_ADMIN".equals(principal.roleCode())
                 || principal.schoolId() == null) {
@@ -310,7 +322,6 @@ public class LeaveCorrectionService {
             throw ApiException.conflict(
                     "CORRECTION_NOT_PENDING", "只有待审批纠错申请可以审批");
         }
-        String reviewRemark = trimToNull(request.remark());
         if ("REJECTED".equals(request.decision())) {
             if (mapper.rejectCorrection(id, reviewRemark, principal.id()) != 1) {
                 throw ApiException.conflict(

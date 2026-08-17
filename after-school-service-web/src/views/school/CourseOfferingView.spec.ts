@@ -3,6 +3,11 @@ import { describe, expect, it } from 'vitest'
 import source from './CourseOfferingView.vue?raw'
 
 describe('CourseOfferingView long form wiring', () => {
+  it('only offers DRAFT when creating an offering', () => {
+    expect(source).toContain('if (editingOffering.value === null)')
+    expect(source).toContain("return [{ value: 'DRAFT', label: statusLabel('DRAFT') }]")
+  })
+
   it('uses the shared guard and freezes the entire form while saving', () => {
     const dialog = source.match(
       /<el-dialog\s+[\s\S]*?v-model="offeringDialogVisible"[\s\S]*?<\/el-dialog>/,

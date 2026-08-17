@@ -142,7 +142,10 @@ const termStatusOptions = computed<Array<{
 }>>(() => {
   const current = terms.value.find((term) => term.id === editingTermId.value)
     ?.status
-  if (!current || current === 'DRAFT') {
+  if (!current) {
+    return [{ label: '草稿', value: 'DRAFT' }]
+  }
+  if (current === 'DRAFT') {
     return [
       { label: '草稿', value: 'DRAFT' },
       { label: '启用', value: 'ACTIVE' },

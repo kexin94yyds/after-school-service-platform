@@ -48,6 +48,8 @@ const revisionLoading = ref(false)
 const revisionError = ref('')
 const revisions = ref<AttendanceRevision[]>([])
 const revisionSubject = ref('')
+const revisionAttendanceId = ref<number | null>(null)
+let revisionLoadVersion = 0
 let initialized = false
 let leaveLoadVersion = 0
 let correctionLoadVersion = 0
@@ -236,13 +238,18 @@ function openCorrectionReview(
 }
 
 async function submitLeaveReview(): Promise<void> {
-  if (!selectedLeave.value) return
+  if (!selectedLeave.value || reviewSaving.value) return
+  const remark = reviewRemark.value.trim()
+  if (reviewDecision.value === 'REJECTED' && !remark) {
+    ElMessage.warning('请填写驳回原因。')
+    return
+  }
   reviewSaving.value = true
   try {
     await leaveCorrectionApi.reviewLeave(
       selectedLeave.value.id,
       reviewDecision.value,
-      reviewRemark.value.trim() || null,
+      remark || null,
     )
     leaveReviewVisible.value = false
     ElMessage.success(reviewDecision.value === 'APPROVED' ? '请假已批准' : '请假已驳回')
@@ -255,13 +262,18 @@ async function submitLeaveReview(): Promise<void> {
 }
 
 async function submitCorrectionReview(): Promise<void> {
-  if (!selectedCorrection.value) return
+  if (!selectedCorrection.value || reviewSaving.value) return
+  const remark = reviewRemark.value.trim()
+  if (reviewDecision.value === 'REJECTED' && !remark) {
+    ElMessage.warning('请填写驳回原因。')
+    return
+  }
   reviewSaving.value = true
   try {
     await leaveCorrectionApi.reviewCorrection(
       selectedCorrection.value.id,
       reviewDecision.value,
-      reviewRemark.value.trim() || null,
+      remark || null,
     )
     correctionReviewVisible.value = false
     ElMessage.success(
@@ -278,18 +290,35 @@ async function submitCorrectionReview(): Promise<void> {
 }
 
 async function openRevisions(item: AttendanceCorrection): Promise<void> {
+  const requestVersion = ++revisionLoadVersion
+  revisionAttendanceId.value = item.attendanceId
   revisionSubject.value = `${item.studentName} · ${item.courseName}`
   revisions.value = []
   revisionError.value = ''
   revisionDrawerVisible.value = true
   revisionLoading.value = true
   try {
-    revisions.value = await leaveCorrectionApi.getRevisions(item.attendanceId)
+    const rows = await leaveCorrectionApi.getRevisions(item.attendanceId)
+    if (
+      requestVersion === revisionLoadVersion &&
+      revisionDrawerVisible.value &&
+      revisionAttendanceId.value === item.attendanceId
+    ) {
+      revisions.value = rows
+    }
   } catch (loadError) {
-    revisionError.value = getErrorMessage(loadError, '考勤修订历史加载失败。')
+    if (requestVersion === revisionLoadVersion) {
+      revisionError.value = getErrorMessage(loadError, '考勤修订历史加载失败。')
+    }
   } finally {
-    revisionLoading.value = false
+    if (requestVersion === revisionLoadVersion) revisionLoading.value = false
   }
+}
+
+function invalidateRevisionLoad(): void {
+  ++revisionLoadVersion
+  revisionLoading.value = false
+  revisionAttendanceId.value = null
 }
 
 watch(activeTab, () => {
@@ -561,7 +590,10 @@ onMounted(async () => {
         <p>{{ selectedLeave.reason }}</p>
       </div>
       <el-form label-position="top">
-        <el-form-item label="审核意见">
+        <el-form-item
+          label="审核意见"
+          :required="reviewDecision === 'REJECTED'"
+        >
           <el-input
             v-model="reviewRemark"
             type="textarea"
@@ -607,7 +639,10 @@ onMounted(async () => {
         title="批准后会立即更新考勤并写入一条不可覆盖的修订记录。"
       />
       <el-form label-position="top">
-        <el-form-item label="审批意见">
+        <el-form-item
+          label="审批意见"
+          :required="reviewDecision === 'REJECTED'"
+        >
           <el-input
             v-model="reviewRemark"
             type="textarea"
@@ -635,6 +670,7 @@ onMounted(async () => {
       :title="`修订历史 · ${revisionSubject}`"
       size="min(560px, 94vw)"
       destroy-on-close
+      @close="invalidateRevisionLoad"
     >
       <el-alert
         v-if="revisionError"

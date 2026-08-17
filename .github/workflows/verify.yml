@@ -36,7 +36,7 @@ jobs:
           cache-dependency-path: after-school-service-web/package-lock.json
 
       - name: Install verification tools
-        run: brew install mysql@8.4 jq
+        run: brew install mysql@8.4 jq flock
 
       - name: Install Chromium for browser E2E
         working-directory: after-school-service-web

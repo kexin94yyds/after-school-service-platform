@@ -28,7 +28,10 @@ public class OperationAuditService {
 
     @Transactional
     public void record(AuditEvent event) {
-        mapper.insert(event);
+        if (mapper.insert(event) != 1) {
+            throw new IllegalStateException(
+                    "Operation audit persistence did not insert exactly one row");
+        }
     }
 
     public List<Map<String, Object>> list(

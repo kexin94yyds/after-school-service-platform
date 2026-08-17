@@ -367,8 +367,9 @@ function validateReschedule(): string {
   ) {
     return `调课日期须位于 ${formatDate(offering.startDate)} 至 ${formatDate(offering.endDate)}。`
   }
-  const target = new Date(
-    `${rescheduleForm.sessionDate}T${rescheduleForm.startTime}`,
+  const target = combineDateAndTime(
+    rescheduleForm.sessionDate,
+    rescheduleForm.startTime,
   )
   if (Number.isNaN(target.getTime()) || target.getTime() <= Date.now()) {
     return '调课后的开始时间必须晚于当前时间。'

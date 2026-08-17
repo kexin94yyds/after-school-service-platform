@@ -35,6 +35,37 @@ class AcademicMapperXmlTest {
     }
 
     @Test
+    void parentClosingLocksAssociatedOfferingsByIdInStableOrder() throws Exception {
+        Configuration configuration = mapperConfiguration();
+
+        BoundSql termSql = configuration
+                .getMappedStatement(AcademicMapper.class.getName()
+                        + ".lockTermOfferings")
+                .getBoundSql(Map.of("termId", 1L));
+        assertThat(normalize(termSql))
+                .contains("FROM course_offering")
+                .contains("term_id = ?")
+                .contains("ORDER BY id")
+                .endsWith("FOR UPDATE");
+        assertThat(termSql.getParameterMappings())
+                .extracting(mapping -> mapping.getProperty())
+                .containsExactly("termId");
+
+        BoundSql planSql = configuration
+                .getMappedStatement(AcademicMapper.class.getName()
+                        + ".lockPlanOfferings")
+                .getBoundSql(Map.of("planId", 10L));
+        assertThat(normalize(planSql))
+                .contains("FROM course_offering")
+                .contains("plan_id = ?")
+                .contains("ORDER BY id")
+                .endsWith("FOR UPDATE");
+        assertThat(planSql.getParameterMappings())
+                .extracting(mapping -> mapping.getProperty())
+                .containsExactly("planId");
+    }
+
+    @Test
     void calendarSessionLockIsScopedBySchoolAndDate() throws Exception {
         Configuration configuration = mapperConfiguration();
         MappedStatement statement = configuration.getMappedStatement(

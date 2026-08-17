@@ -14,6 +14,7 @@ server_select_script="${project_root}/scripts/select-server-release.sh"
 backup_script="${project_root}/scripts/backup-mysql.sh"
 restore_script="${project_root}/scripts/restore-mysql-backup.sh"
 monitor_script="${project_root}/scripts/monitor-health.sh"
+run_demo_script="${project_root}/scripts/run-demo.sh"
 production_check_script="${project_root}/scripts/check-production.sh"
 systemd_dir="${project_root}/deploy/systemd"
 config_example_dir="${project_root}/deploy/config"
@@ -185,6 +186,7 @@ for executable_script in \
   "${backup_script}" \
   "${restore_script}" \
   "${monitor_script}" \
+  "${run_demo_script}" \
   "${production_check_script}"; do
   [[ -x "${executable_script}" ]] \
     || fail "production operations script must be executable: ${executable_script}"
@@ -197,6 +199,7 @@ bash -n \
   "${backup_script}" \
   "${restore_script}" \
   "${monitor_script}" \
+  "${run_demo_script}" \
   "${production_check_script}" \
   || fail "production operations script syntax failed"
 
@@ -248,6 +251,26 @@ grep -Fq 'check-production: ALL CHECKS PASSED' "${production_check_script}" \
   || fail "production check must have an explicit all-pass terminal state"
 grep -Fq 'latest backup service run failed' "${monitor_script}" \
   || fail "health monitor must surface a failed backup service run"
+grep -Fq 'MYSQL_DATABASE must contain only letters, digits and underscore' \
+  "${monitor_script}" \
+  || fail "health monitor must validate its target database"
+grep -Fq 'sha256sum --check --status' "${monitor_script}" \
+  || fail "health monitor must verify backup checksums"
+grep -Fq 'RESTORE_REQUIRED_FLYWAY_VERSION' "${restore_script}" \
+  || fail "restore script must validate the required Flyway version"
+grep -Fq 'fk_supervision_alert_scan_run' "${restore_script}" \
+  || fail "restore script must validate supervision scan-run integrity"
+grep -Fq 'env -i' "${run_demo_script}" \
+  || fail "demo launcher must clear inherited production environment variables"
+grep -Fq 'after_school_demo' "${run_demo_script}" \
+  || fail "demo launcher must target the dedicated local demo database"
+grep -Fq 'SERVER_ADDRESS=127.0.0.1' "${run_demo_script}" \
+  || fail "demo launcher must bind the application server to loopback"
+grep -Fq 'MANAGEMENT_SERVER_ADDRESS=127.0.0.1' "${run_demo_script}" \
+  || fail "demo launcher must bind management endpoints to loopback"
+grep -Fq 'production release JAR must not package demo payload' \
+  "${server_install_script}" \
+  || fail "production release installer must reject demo artifacts"
 grep -Fq 'TLS certificate path must resolve to a regular file' \
   "${production_check_script}" \
   || fail "production check must accept certificate paths that resolve through renewal symlinks"
@@ -262,6 +285,15 @@ for database_url_contract in \
   grep -Fq "${database_url_contract}" \
     "${config_example_dir}/after-school-service.conf.example" \
     || fail "production database URL contract is missing: ${database_url_contract}"
+done
+for backup_rpo_contract in \
+  'OnCalendar=*-*-* 00,12:15:00' \
+  'RandomizedDelaySec=15m' \
+  'BACKUP_MAX_AGE_HOURS=18'; do
+  grep -Fxq "${backup_rpo_contract}" \
+    "${systemd_dir}/after-school-backup.timer" \
+    "${config_example_dir}/after-school-monitor.conf.example" \
+    || fail "backup RPO contract is missing: ${backup_rpo_contract}"
 done
 for delivery_script in install-server-release.sh select-server-release.sh \
     install-web-release.sh select-web-release.sh backup-mysql.sh \
@@ -644,7 +676,8 @@ for migration in \
   V7__add_supervision_audit_evaluation_and_reporting.sql \
   V9__separate_current_guardian_authorization.sql \
   V10__preserve_reviewed_leave_withdrawal_history.sql \
-  V12__add_supervision_scan_runs.sql; do
+  V12__add_supervision_scan_runs.sql \
+  V13__link_supervision_alert_scan_runs.sql; do
   [[ -f "${migration_dir}/${migration}" ]] || fail "missing migration ${migration}"
 done
 demo_migration="${server_dir}/src/main/resources/db/demo/V4__seed_demo_workflow.sql"
@@ -655,6 +688,9 @@ comprehensive_demo_migration="${server_dir}/src/main/resources/db/demo/V8__seed_
 credential_demo_migration="${server_dir}/src/main/resources/db/demo/V11__simplify_demo_login_credentials.sql"
 [[ -f "${credential_demo_migration}" ]] \
   || fail "missing demo-only migration V11__simplify_demo_login_credentials.sql"
+demo_scan_run_bridge_migration="${server_dir}/src/main/resources/db/demo/V4_1__seed_demo_scan_run_parent.sql"
+[[ -f "${demo_scan_run_bridge_migration}" ]] \
+  || fail "missing demo scan-run compatibility bridge migration"
 if grep -RhEq "AfterSchool@2026|123456|'regulator'|'admin'" "${migration_dir}"; then
   fail "default production migrations must not contain demo accounts or passwords"
 fi
@@ -667,11 +703,12 @@ for guard in \
   uk_leave_active_session_student \
   uk_revision_correction \
   uk_supervision_alert_dedup \
+  fk_supervision_alert_scan_run \
   uk_course_evaluation_target; do
   grep -RhFq "${guard}" "${migration_dir}" || fail "missing schema guard ${guard}"
 done
 
-log_step "Running backend automated tests and packaging"
+log_step "Running backend automated tests and packaging production/demo artifacts"
 
 (
   cd "${server_dir}"
@@ -701,19 +738,66 @@ for jar_entry in \
   "BOOT-INF/classes/com/afterschool/platform/evaluation/EvaluationService.class" \
   "BOOT-INF/classes/com/afterschool/platform/audit/OperationAuditService.class" \
   "BOOT-INF/classes/com/afterschool/platform/report/ReportController.class" \
-  "BOOT-INF/classes/com/afterschool/platform/demo/DemoTimelineRefresher.class" \
   "BOOT-INF/classes/db/migration/V5__add_academic_planning_and_resource_constraints.sql" \
   "BOOT-INF/classes/db/migration/V6__add_leave_and_attendance_correction_workflows.sql" \
   "BOOT-INF/classes/db/migration/V7__add_supervision_audit_evaluation_and_reporting.sql" \
   "BOOT-INF/classes/db/migration/V9__separate_current_guardian_authorization.sql" \
   "BOOT-INF/classes/db/migration/V10__preserve_reviewed_leave_withdrawal_history.sql" \
   "BOOT-INF/classes/db/migration/V12__add_supervision_scan_runs.sql" \
-  "BOOT-INF/classes/db/demo/V4__seed_demo_workflow.sql" \
-  "BOOT-INF/classes/db/demo/V8__seed_comprehensive_graduation_workflow.sql" \
-  "BOOT-INF/classes/db/demo/V11__simplify_demo_login_credentials.sql"; do
+  "BOOT-INF/classes/db/migration/V13__link_supervision_alert_scan_runs.sql"; do
   "${jdk21_home}/bin/jar" tf "${jar_path}" | grep -Fq "${jar_entry}" \
     || fail "backend JAR is missing ${jar_entry}"
 done
+if "${jdk21_home}/bin/jar" tf "${jar_path}" \
+    | grep -Eq \
+      '^BOOT-INF/classes/(db/demo/|application-demo\.yml$|com/afterschool/platform/demo/DemoTimelineRefresher\.class$)'; then
+  fail "production backend JAR must not package demo payload"
+fi
+
+(
+  cd "${server_dir}"
+  env -u SPRING_FLYWAY_LOCATIONS \
+    -u SPRING_FLYWAY_OUT_OF_ORDER \
+    -u SPRING_PROFILES_ACTIVE \
+    JAVA_HOME="${jdk21_home}" PATH="${jdk21_home}/bin:${PATH}" \
+    mvn -B verify -Pdemo-artifact
+)
+demo_jar_path="${server_dir}/target/after-school-service-server-0.0.1-SNAPSHOT-demo.jar"
+[[ -f "${demo_jar_path}" ]] || fail "separately packaged demo JAR was not generated"
+for demo_jar_entry in \
+  "BOOT-INF/classes/application-demo.yml" \
+  "BOOT-INF/classes/com/afterschool/platform/demo/DemoTimelineRefresher.class" \
+  "BOOT-INF/classes/db/demo/V4__seed_demo_workflow.sql" \
+  "BOOT-INF/classes/db/demo/V4_1__seed_demo_scan_run_parent.sql" \
+  "BOOT-INF/classes/db/demo/V8__seed_comprehensive_graduation_workflow.sql" \
+  "BOOT-INF/classes/db/demo/V11__simplify_demo_login_credentials.sql" \
+  "BOOT-INF/classes/db/migration/V13__link_supervision_alert_scan_runs.sql"; do
+  "${jdk21_home}/bin/jar" tf "${demo_jar_path}" | grep -Fq "${demo_jar_entry}" \
+    || fail "demo backend JAR is missing ${demo_jar_entry}"
+done
+(
+  cd "${server_dir}"
+  # Do not clean here: prove the production archive still excludes db/demo
+  # after a demo-artifact build has populated target/classes.
+  env -u SPRING_FLYWAY_LOCATIONS \
+    -u SPRING_FLYWAY_OUT_OF_ORDER \
+    -u SPRING_PROFILES_ACTIVE \
+    JAVA_HOME="${jdk21_home}" PATH="${jdk21_home}/bin:${PATH}" \
+    mvn -B -DskipTests package
+)
+if "${jdk21_home}/bin/jar" tf "${jar_path}" \
+    | grep -Eq \
+      '^BOOT-INF/classes/(db/demo/|application-demo\.yml$|com/afterschool/platform/demo/DemoTimelineRefresher\.class$)'; then
+  fail "production JAR retained demo payload after an incremental demo build"
+fi
+if demo_launcher_output="$(
+  DEMO_DB_PASSWORD='verify-demo-password' \
+    "${run_demo_script}" "${jar_path}" 2>&1
+)"; then
+  fail "demo launcher accepted the production JAR"
+fi
+[[ "${demo_launcher_output}" == *"separately packaged demo artifact"* ]] \
+  || fail "demo launcher did not reject the production JAR clearly"
 
 log_step "Testing backend release, encrypted backup and health-monitor contracts"
 
@@ -740,6 +824,14 @@ export AFTER_SCHOOL_HEALTH_INTERVAL_SECONDS=1
   || fail "first backend release was not selected"
 [[ -s "${verify_release_root}/releases/release-one/app.jar.sha256" ]] \
   || fail "backend release checksum was not installed"
+if demo_release_output="$(
+  "${server_install_script}" "${demo_jar_path}" demo-artifact-forbidden \
+    "${verify_release_root}" 30 2>&1
+)"; then
+  fail "production release installer accepted the demo JAR"
+fi
+[[ "${demo_release_output}" == *"must not package demo payload"* ]] \
+  || fail "production release installer did not explain demo JAR rejection"
 if bad_release_output="$(
   "${server_install_script}" "${jar_path}" release-bad "${verify_release_root}" 30 \
     2>&1
@@ -773,7 +865,10 @@ verify_mock_mysqldump() {
   fi
   printf '%s\n' \
     'CREATE TABLE `flyway_schema_history` (`installed_rank` int);' \
-    'INSERT INTO `flyway_schema_history` VALUES (1);'
+    'INSERT INTO `flyway_schema_history` VALUES (1);' \
+    'CREATE TABLE `school` (`id` bigint);' \
+    'CREATE TABLE `supervision_alert` (`id` bigint, `scan_run_id` char(36));' \
+    'CREATE TABLE `supervision_scan_run` (`id` char(36));'
 }
 verify_mock_age() {
   if [[ "${1:-}" == "--version" ]]; then
@@ -806,10 +901,16 @@ verify_mock_mysql() {
   local args="$*"
   if [[ "${args}" == *"information_schema.SCHEMATA"* ]]; then
     printf '0\n'
-  elif [[ "${args}" == *"table_name = 'flyway_schema_history'"* ]]; then
-    printf '1\n'
+  elif [[ "${args}" == *"FROM \`after_school_restore_verify\`.\`flyway_schema_history\`"* ]]; then
+    printf '14:0:%s\n' "${VERIFY_RESTORE_REQUIRED_VERSION_PRESENT:-1}"
+  elif [[ "${args}" == *"information_schema.referential_constraints"* ]]; then
+    printf '3\n'
+  elif [[ "${args}" == *"table_name IN ("* && "${args}" == *"supervision_scan_run"* ]]; then
+    printf '11\n'
+  elif [[ "${args}" == *"FROM \`after_school_restore_verify\`.\`supervision_alert\`"* ]]; then
+    printf '0\n'
   elif [[ "${args}" == *"information_schema.tables"* ]]; then
-    printf '18\n'
+    printf '26\n'
   elif [[ "${args}" == *"--execute="* ]]; then
     return 0
   else
@@ -825,6 +926,7 @@ export BACKUP_DIR="${backup_test_dir}"
 export BACKUP_LOCK_FILE="${operations_test_root}/backup.lock"
 export MYSQL_DEFAULTS_FILE="${backup_credentials}"
 export AGE_RECIPIENTS_FILE="${backup_recipients}"
+export RESTORE_REQUIRED_FLYWAY_VERSION=13
 "${backup_script}" >/dev/null
 backup_test_file="$(find "${backup_test_dir}" -maxdepth 1 -type f \
   -name '*.sql.gz.age' -print -quit)"
@@ -833,10 +935,43 @@ backup_test_file="$(find "${backup_test_dir}" -maxdepth 1 -type f \
   || fail "encrypted backup and checksum were not created"
 [[ -z "$(find "${backup_test_dir}" -maxdepth 1 -type f -name '*.sql' -print -quit)" ]] \
   || fail "backup pipeline wrote plaintext SQL to disk"
+backup_checksum_file="${backup_test_file}.sha256"
+backup_checksum_original="$(<"${backup_checksum_file}")"
+alternate_backup_file="${backup_test_dir}/other-complete-backup.sql.gz.age"
+cp "${backup_test_file}" "${alternate_backup_file}"
+if command -v sha256sum >/dev/null 2>&1; then
+  (
+    cd "${backup_test_dir}"
+    sha256sum "$(basename -- "${alternate_backup_file}")" \
+      >"$(basename -- "${backup_checksum_file}")"
+  )
+else
+  (
+    cd "${backup_test_dir}"
+    shasum -a 256 "$(basename -- "${alternate_backup_file}")" \
+      >"$(basename -- "${backup_checksum_file}")"
+  )
+fi
+if mismatched_restore_output="$(
+  "${restore_script}" "${backup_test_file}" after_school_restore_checksum_target \
+    "${backup_credentials}" "${restore_identity}" 2>&1
+)"; then
+  fail "restore accepted a checksum that validates a different complete backup"
+fi
+[[ "${mismatched_restore_output}" == *"points to another file"* ]] \
+  || fail "restore did not identify a checksum targeting another backup"
+printf '%s\n' "${backup_checksum_original}" >"${backup_checksum_file}"
 "${restore_script}" "${backup_test_file}" after_school_restore_verify \
   "${backup_credentials}" "${restore_identity}" >/dev/null
+export VERIFY_RESTORE_REQUIRED_VERSION_PRESENT=0
+if "${restore_script}" "${backup_test_file}" after_school_restore_verify \
+    "${backup_credentials}" "${restore_identity}" >/dev/null 2>&1; then
+  fail "restore accepted a backup that predates the required Flyway version"
+fi
+unset VERIFY_RESTORE_REQUIRED_VERSION_PRESENT
 unset AFTER_SCHOOL_MYSQLDUMP_BIN AFTER_SCHOOL_MYSQL_BIN AFTER_SCHOOL_AGE_BIN \
-  MYSQL_DATABASE BACKUP_LOCK_FILE MYSQL_DEFAULTS_FILE AGE_RECIPIENTS_FILE
+  MYSQL_DATABASE BACKUP_LOCK_FILE MYSQL_DEFAULTS_FILE AGE_RECIPIENTS_FILE \
+  RESTORE_REQUIRED_FLYWAY_VERSION
 unset -f verify_mock_mysqldump verify_mock_age verify_mock_mysql
 
 verify_mock_monitor_systemctl() {
@@ -856,12 +991,33 @@ export -f verify_mock_monitor_systemctl verify_mock_monitor_curl
 export AFTER_SCHOOL_SYSTEMCTL_BIN=verify_mock_monitor_systemctl
 export AFTER_SCHOOL_CURL_BIN=verify_mock_monitor_curl
 export MONITOR_STATE_FILE="${operations_test_root}/monitor-state/current"
-export BACKUP_MAX_AGE_HOURS=36
+export MYSQL_DATABASE=after_school_service
+export BACKUP_MAX_AGE_HOURS=18
 export VERIFY_HEALTH_FAILED=0
 export VERIFY_BACKUP_SERVICE_FAILED=0
 "${monitor_script}" >/dev/null
 [[ "$(sed -n '1p' "${MONITOR_STATE_FILE}")" == "HEALTHY" ]] \
   || fail "health monitor did not record healthy state"
+printf '%064d  %s\n' 0 "$(basename -- "${backup_test_file}")" >"${backup_checksum_file}"
+if "${monitor_script}" >/dev/null 2>&1; then
+  fail "health monitor accepted a malformed or mismatched backup checksum"
+fi
+[[ "$(sed -n '1p' "${MONITOR_STATE_FILE}")" == "FAILED" ]] \
+  || fail "health monitor did not record failed checksum state"
+printf '%s\n' "${backup_checksum_original}" >"${backup_checksum_file}"
+"${monitor_script}" >/dev/null
+[[ "$(sed -n '1p' "${MONITOR_STATE_FILE}")" == "HEALTHY" ]] \
+  || fail "health monitor did not recover after checksum restoration"
+export MYSQL_DATABASE=another_database
+if "${monitor_script}" >/dev/null 2>&1; then
+  fail "health monitor accepted a backup belonging to another database"
+fi
+[[ "$(sed -n '1p' "${MONITOR_STATE_FILE}")" == "FAILED" ]] \
+  || fail "health monitor did not record missing target-database backup"
+export MYSQL_DATABASE=after_school_service
+"${monitor_script}" >/dev/null
+[[ "$(sed -n '1p' "${MONITOR_STATE_FILE}")" == "HEALTHY" ]] \
+  || fail "health monitor did not recover after restoring target database"
 export VERIFY_BACKUP_SERVICE_FAILED=1
 if "${monitor_script}" >/dev/null 2>&1; then
   fail "health monitor accepted a failed backup service run"
@@ -883,7 +1039,8 @@ export VERIFY_HEALTH_FAILED=0
 [[ "$(sed -n '1p' "${MONITOR_STATE_FILE}")" == "HEALTHY" ]] \
   || fail "health monitor did not record recovered state"
 unset AFTER_SCHOOL_SYSTEMCTL_BIN AFTER_SCHOOL_CURL_BIN MONITOR_STATE_FILE \
-  BACKUP_MAX_AGE_HOURS VERIFY_HEALTH_FAILED VERIFY_BACKUP_SERVICE_FAILED BACKUP_DIR
+  MYSQL_DATABASE BACKUP_MAX_AGE_HOURS VERIFY_HEALTH_FAILED \
+  VERIFY_BACKUP_SERVICE_FAILED BACKUP_DIR
 unset -f verify_mock_monitor_systemctl verify_mock_monitor_curl
 
 log_step "Running frontend tests, typecheck, production build and audit"
@@ -1038,8 +1195,8 @@ mysql_version="$(
 [[ "${mysql_version}" == 8.4.* ]] || fail "expected MySQL 8.4.x, got ${mysql_version}"
 printf "[verify] MySQL: %s\n" "${mysql_version}"
 
-db_name="after_school_verify"
-db_user="after_school_verify"
+db_name="after_school_demo"
+db_user="after_school_demo"
 db_password="Verify-Only-Db-Password-2026"
 "${mysql_client}" --no-defaults --protocol=socket --socket="${mysql_socket}" -uroot <<SQL
 CREATE DATABASE ${db_name} CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
@@ -1052,8 +1209,21 @@ start_server() {
   local active_profile="${1:-demo}"
   local wait_for_demo_timeline="${2:-true}"
   local active_profile_value=""
+  local runtime_jar="${jar_path}"
+  local inherited_db_url=""
+  local inherited_db_username="${db_user}"
+  local inherited_db_password="${db_password}"
   if [[ "${active_profile}" != "default" ]]; then
     active_profile_value="${active_profile}"
+  fi
+  if [[ "${active_profile}" == "demo" ]]; then
+    runtime_jar="${demo_jar_path}"
+    # A successful startup proves application-demo.yml does not inherit DB_URL.
+    inherited_db_url="jdbc:mysql://127.0.0.1:1/production_url_must_not_be_used?connectTimeout=1000"
+    inherited_db_username="production_url_must_not_be_used"
+    inherited_db_password="production-url-must-not-be-used"
+  else
+    inherited_db_url="jdbc:mysql://127.0.0.1:${mysql_port}/${db_name}?useUnicode=true&characterEncoding=UTF-8&connectionTimeZone=%2B08%3A00&forceConnectionTimeZoneToSession=true&allowPublicKeyRetrieval=true&useSSL=false"
   fi
   : >"${run_root}/server.log"
   (
@@ -1077,12 +1247,15 @@ start_server() {
       MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE=readinessState,db \
       SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT=2000 \
       SPRING_DATASOURCE_HIKARI_VALIDATION_TIMEOUT=1000 \
-      DB_URL="jdbc:mysql://127.0.0.1:${mysql_port}/${db_name}?useUnicode=true&characterEncoding=UTF-8&connectionTimeZone=%2B08%3A00&forceConnectionTimeZoneToSession=true&allowPublicKeyRetrieval=true&useSSL=false" \
-      DB_USERNAME="${db_user}" \
-      DB_PASSWORD="${db_password}" \
+      DB_URL="${inherited_db_url}" \
+      DB_USERNAME="${inherited_db_username}" \
+      DB_PASSWORD="${inherited_db_password}" \
+      DEMO_MYSQL_PORT="${mysql_port}" \
+      DEMO_DB_USERNAME="${db_user}" \
+      DEMO_DB_PASSWORD="${db_password}" \
       SPRINGDOC_ENABLED=false \
       APP_CORS_ALLOWED_ORIGIN="http://127.0.0.1:${web_port}" \
-      java -jar "${jar_path}"
+      java -jar "${runtime_jar}"
   ) >"${run_root}/server.log" 2>&1 &
   server_pid="$!"
 
@@ -1118,7 +1291,7 @@ stop_server() {
   server_pid=""
 }
 
-log_step "Migrating the fresh database through the production-only V12 schema"
+log_step "Migrating the fresh database through the production-only V13 schema"
 
 start_server default false
 production_history="$(
@@ -1132,8 +1305,8 @@ production_history="$(
      FROM flyway_schema_history
      WHERE success = 1"
 )"
-[[ "${production_history}" == "9:0:12" ]] \
-  || fail "default profile did not stop at the production-only V12 schema: ${production_history}"
+[[ "${production_history}" == "10:0:13" ]] \
+  || fail "default profile did not stop at the production-only V13 schema: ${production_history}"
 production_demo_users="$(
   "${mysql_client}" --no-defaults --protocol=socket --socket="${mysql_socket}" \
     -uroot --skip-column-names "${db_name}" -e \
@@ -1144,7 +1317,7 @@ production_demo_users="$(
   || fail "default profile unexpectedly inserted demo accounts"
 stop_server
 
-log_step "Switching the existing V12 schema to the real demo profile"
+log_step "Switching the existing V13 schema to the real demo profile"
 
 start_server
 base_url="http://127.0.0.1:${server_port}/api"
@@ -1162,7 +1335,39 @@ migration_count="$(
     -uroot --skip-column-names "${db_name}" -e \
     "SELECT COUNT(*) FROM flyway_schema_history WHERE success = 1"
 )"
-[[ "${migration_count}" == "12" ]] || fail "expected 12 successful Flyway migrations"
+[[ "${migration_count}" == "14" ]] || fail "expected 14 successful Flyway migrations"
+scan_run_fk_count="$(
+  "${mysql_client}" --no-defaults --protocol=socket --socket="${mysql_socket}" \
+    -uroot --skip-column-names "${db_name}" -e \
+    "SELECT COUNT(*)
+     FROM information_schema.referential_constraints
+     WHERE constraint_schema = '${db_name}'
+       AND table_name = 'supervision_alert'
+       AND constraint_name = 'fk_supervision_alert_scan_run'
+       AND referenced_table_name = 'supervision_scan_run'"
+)"
+[[ "${scan_run_fk_count}" == "1" ]] \
+  || fail "supervision alerts must reference a persisted scan run"
+scan_run_orphan_count="$(
+  "${mysql_client}" --no-defaults --protocol=socket --socket="${mysql_socket}" \
+    -uroot --skip-column-names "${db_name}" -e \
+    "SELECT COUNT(*)
+     FROM supervision_alert AS alert
+     LEFT JOIN supervision_scan_run AS scan_run
+       ON scan_run.id = alert.scan_run_id
+     WHERE scan_run.id IS NULL"
+)"
+[[ "${scan_run_orphan_count}" == "0" ]] \
+  || fail "demo switch left supervision alerts without a scan-run parent"
+demo_seeded_scan_run="$(
+  "${mysql_client}" --no-defaults --protocol=socket --socket="${mysql_socket}" \
+    -uroot --skip-column-names "${db_name}" -e \
+    "SELECT CONCAT(trigger_source, ':', status, ':', candidate_count, ':', created_count)
+     FROM supervision_scan_run
+     WHERE id = '11111111-1111-4111-8111-111111111111'"
+)"
+[[ "${demo_seeded_scan_run}" == "SCHEDULED:SUCCESS:1:1" ]] \
+  || fail "demo scan-run bridge did not preserve the V8 alert provenance"
 demo_operational_offerings="$(
   "${mysql_client}" --no-defaults --protocol=socket --socket="${mysql_socket}" \
     -uroot --skip-column-names "${db_name}" -e \
@@ -1373,6 +1578,7 @@ read -r rule_year rule_start_date rule_end_date \
   rule_enrollment_start rule_enrollment_end rule_future_enrollment_start \
   <<<"${rule_dates}"
 rule_term="VERIFY-${rule_year}"
+initial_offering_status_checked=false
 
 create_offering() {
   local code="$1"
@@ -1395,8 +1601,26 @@ create_offering() {
     --argjson capacity "${capacity}" \
     --arg enrollmentStart "${enrollment_start}" \
     --arg enrollmentEnd "${enrollment_end}" \
-    '{schoolId:1,courseId:$courseId,teacherId:$teacherId,offeringCode:$code,term:$term,weekDay:$weekDay,startTime:"16:30:00",endTime:"17:30:00",startDate:$startDate,endDate:$endDate,enrollmentStart:$enrollmentStart,enrollmentEnd:$enrollmentEnd,capacity:$capacity,classroom:"验收教室",status:"PUBLISHED"}')"
-  write_api 201 POST /offerings "${admin_jar}" "${body}" "${output}"
+    '{schoolId:1,courseId:$courseId,teacherId:$teacherId,offeringCode:$code,term:$term,weekDay:$weekDay,startTime:"16:30:00",endTime:"17:30:00",startDate:$startDate,endDate:$endDate,enrollmentStart:$enrollmentStart,enrollmentEnd:$enrollmentEnd,capacity:$capacity,classroom:"验收教室",status:"DRAFT"}')"
+  if [[ "${initial_offering_status_checked}" != "true" ]]; then
+    local invalid_initial_body
+    invalid_initial_body="$(jq '.status = "PUBLISHED"' <<<"${body}")"
+    write_api 400 POST /offerings "${admin_jar}" "${invalid_initial_body}" \
+      "${run_root}/invalid-initial-offering.json"
+    jq -e '.code == "INITIAL_OFFERING_STATUS_INVALID"' \
+      "${run_root}/invalid-initial-offering.json" >/dev/null \
+      || fail "new offering must reject any initial status except DRAFT"
+    initial_offering_status_checked=true
+  fi
+  write_api 201 POST /offerings "${admin_jar}" "${body}" "${output}.draft"
+  local offering_id
+  offering_id="$(jq -r '.id' "${output}.draft")"
+  [[ "${offering_id}" =~ ^[0-9]+$ ]] \
+    || fail "draft offering creation returned no id: ${code}"
+  body="$(jq '.status = "PUBLISHED"' <<<"${body}")"
+  write_api 200 PUT "/offerings/${offering_id}" "${admin_jar}" "${body}" "${output}"
+  jq -e '.status == "PUBLISHED"' "${output}" >/dev/null \
+    || fail "draft offering did not transition to PUBLISHED: ${code}"
 }
 
 create_offering O-VERIFY-BASE 1 2 "${course_id}" 20 \
@@ -1467,12 +1691,21 @@ attendance_offering_body="$(
       enrollmentEnd:"2099-12-31T23:59:59",
       capacity:10,
       classroom:"考勤验收教室",
-      status:"PUBLISHED"
+      status:"DRAFT"
     }'
 )"
 write_api 201 POST /offerings "${admin_jar}" "${attendance_offering_body}" \
-  "${run_root}/attendance-offering.json"
-attendance_offering_id="$(jq -r '.id' "${run_root}/attendance-offering.json")"
+  "${run_root}/attendance-offering.draft.json"
+attendance_offering_id="$(jq -r '.id' "${run_root}/attendance-offering.draft.json")"
+[[ "${attendance_offering_id}" =~ ^[0-9]+$ ]] \
+  || fail "attendance draft offering creation returned no id"
+attendance_offering_body="$(
+  jq '.status = "PUBLISHED"' <<<"${attendance_offering_body}"
+)"
+write_api 200 PUT "/offerings/${attendance_offering_id}" "${admin_jar}" \
+  "${attendance_offering_body}" "${run_root}/attendance-offering.json"
+jq -e '.status == "PUBLISHED"' "${run_root}/attendance-offering.json" >/dev/null \
+  || fail "attendance draft offering did not transition to PUBLISHED"
 
 login_as parent_chen GUARDIAN "${parent_jar}"
 parent_students_status="$(
@@ -1960,11 +2193,23 @@ jq -e --argjson id "${admin_cancel_id}" \
 
 log_step "Verifying academic planning, resources, leave and correction workflows"
 
-term_body='{"termCode":"VERIFY-2098","termName":"2098 验收学期","startDate":"2098-01-01","endDate":"2098-03-31","status":"ACTIVE"}'
+invalid_term_body='{"termCode":"VERIFY-2098-INVALID","termName":"2098 非法初态验收学期","startDate":"2098-01-01","endDate":"2098-03-31","status":"ACTIVE"}'
+write_api 400 POST /terms "${regulator_jar}" "${invalid_term_body}" \
+  "${run_root}/invalid-initial-term.json"
+jq -e '.code == "INITIAL_TERM_STATUS_INVALID"' \
+  "${run_root}/invalid-initial-term.json" >/dev/null \
+  || fail "new academic term must reject any initial status except DRAFT"
+
+term_body='{"termCode":"VERIFY-2098","termName":"2098 验收学期","startDate":"2098-01-01","endDate":"2098-03-31","status":"DRAFT"}'
 write_api 201 POST /terms "${regulator_jar}" "${term_body}" \
-  "${run_root}/academic-term.json"
-verify_term_id="$(jq -r '.id' "${run_root}/academic-term.json")"
+  "${run_root}/academic-term-draft.json"
+verify_term_id="$(jq -r '.id' "${run_root}/academic-term-draft.json")"
 [[ "${verify_term_id}" =~ ^[0-9]+$ ]] || fail "academic term creation returned no id"
+term_body="$(jq '.status = "ACTIVE"' <<<"${term_body}")"
+write_api 200 PUT "/terms/${verify_term_id}" "${regulator_jar}" "${term_body}" \
+  "${run_root}/academic-term.json"
+jq -e '.status == "ACTIVE"' "${run_root}/academic-term.json" >/dev/null \
+  || fail "draft academic term did not transition to ACTIVE"
 
 plan_body="$(
   jq -nc --argjson termId "${verify_term_id}" \
@@ -2040,21 +2285,28 @@ planned_offering_body="$(
       enrollmentEnd:"2097-12-31T23:59:59",
       capacity:10,
       classroom:"由标准教室自动回填",
-      status:"PUBLISHED",
+      status:"DRAFT",
       termId:$termId,
       planId:$planId,
       roomId:$roomId
     }'
 )"
 write_api 201 POST /offerings "${admin_jar}" "${planned_offering_body}" \
-  "${run_root}/planned-offering.json"
-planned_offering_id="$(jq -r '.id' "${run_root}/planned-offering.json")"
+  "${run_root}/planned-offering.draft.json"
+planned_offering_id="$(jq -r '.id' "${run_root}/planned-offering.draft.json")"
+[[ "${planned_offering_id}" =~ ^[0-9]+$ ]] \
+  || fail "planned draft offering creation returned no id"
+planned_offering_body="$(
+  jq '.status = "PUBLISHED"' <<<"${planned_offering_body}"
+)"
+write_api 200 PUT "/offerings/${planned_offering_id}" "${admin_jar}" \
+  "${planned_offering_body}" "${run_root}/planned-offering.json"
 jq -e \
   --argjson termId "${verify_term_id}" \
   --argjson planId "${verify_plan_id}" \
   --argjson roomId "${verify_room_id}" \
   '.termId == $termId and .planId == $planId and .roomId == $roomId
-   and .classroom == "验收综合教室"' \
+   and .classroom == "验收综合教室" and .status == "PUBLISHED"' \
   "${run_root}/planned-offering.json" >/dev/null \
   || fail "planned offering did not retain normalized academic resources"
 
@@ -2666,7 +2918,7 @@ migration_count_after_restart="$(
     -uroot --skip-column-names "${db_name}" -e \
     "SELECT COUNT(*) FROM flyway_schema_history WHERE success = 1"
 )"
-[[ "${migration_count_after_restart}" == "12" ]] \
+[[ "${migration_count_after_restart}" == "14" ]] \
   || fail "Flyway restart was not idempotent"
 refreshed_timeline_invariants="$(
   "${mysql_client}" --no-defaults --protocol=socket --socket="${mysql_socket}" \
@@ -2962,7 +3214,7 @@ stop_server
 printf "\n[verify] SUCCESS\n"
 printf "[verify] Backend: %s automated tests + executable JAR + CycloneDX SBOM passed\n" "${test_count}"
 printf "[verify] Frontend: Vitest + typecheck + production build + audit + desktop/mobile Playwright passed\n"
-printf "[verify] Database: MySQL %s default V12 -> demo V4/V8/V11 + guarded re-anchor/restart/closed-term preservation passed\n" "${mysql_version}"
+printf "[verify] Database: MySQL %s default V13 -> demo V4/V4.1/V8/V11 + scan-run FK/restart/closed-term preservation passed\n" "${mysql_version}"
 printf "[verify] E2E: auth/RBAC/CRUD/planning/enrollment/leave/teaching/correction/supervision/evaluation/audit/reports passed\n"
 printf "[verify] Operations: atomic frontend/backend rollback + encrypted backup/restore + backup-service-aware health transitions passed\n"
 printf "[verify] Supply chain: CI + OWASP high-severity gate + SBOM contracts passed\n"

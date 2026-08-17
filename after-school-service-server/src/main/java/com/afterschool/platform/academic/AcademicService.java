@@ -33,13 +33,18 @@ public class AcademicService {
 
     @Transactional
     public Map<String, Object> createTerm(AcademicController.TermRequest request) {
+        if (!"DRAFT".equals(request.status())) {
+            throw ApiException.badRequest(
+                    "INITIAL_TERM_STATUS_INVALID",
+                    "新建学期状态必须为草稿");
+        }
         validateTermRange(request.startDate(), request.endDate());
         mapper.insertTerm(
                 request.termCode().strip(),
                 request.termName().strip(),
                 request.startDate(),
                 request.endDate(),
-                request.status(),
+                "DRAFT",
                 currentUser.principal().id());
         return mapper.findTermByCode(request.termCode().strip());
     }
@@ -61,6 +66,10 @@ public class AcademicService {
             throw ApiException.conflict(
                     "TERM_SHAPE_FROZEN",
                     "学期启用或已有学校计划后不能修改编码及日期范围");
+        }
+        if (isClosedOrArchived(request.status())
+                && !Objects.equals(current.getStatus(), request.status())) {
+            mapper.lockTermOfferings(id);
         }
         if (mapper.updateTerm(
                         id,
@@ -175,6 +184,10 @@ public class AcademicService {
                         "ACTIVE_PLAN_EXISTS",
                         "同一学校同一学期只能有一个生效中的服务计划");
             }
+        }
+        if (isClosedOrArchived(request.targetStatus())
+                && !Objects.equals(current.getStatus(), request.targetStatus())) {
+            mapper.lockPlanOfferings(id);
         }
         if (mapper.transitionServicePlan(
                         id,
@@ -720,6 +733,10 @@ public class AcademicService {
                     "INVALID_TERM_RANGE",
                     "学期开始日期不能晚于结束日期");
         }
+    }
+
+    private boolean isClosedOrArchived(String status) {
+        return "CLOSED".equals(status) || "ARCHIVED".equals(status);
     }
 
     private void validateTermTransition(String current, String target) {
