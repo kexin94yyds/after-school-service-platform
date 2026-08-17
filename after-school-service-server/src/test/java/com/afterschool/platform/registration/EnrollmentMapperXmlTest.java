@@ -87,6 +87,37 @@ class EnrollmentMapperXmlTest {
     }
 
     @Test
+    void offeringLockAvoidsParentTablesWhileEligibilityReadLoadsTheirStates()
+            throws Exception {
+        Configuration configuration = mapperConfiguration();
+        BoundSql readSql = configuration
+                .getMappedStatement(EnrollmentMapper.class.getName()
+                        + ".findOffering")
+                .getBoundSql(Map.of("offeringId", 20L));
+        String read = readSql.getSql().replaceAll("\\s+", " ").trim();
+
+        assertThat(read)
+                .contains("LEFT JOIN academic_term term ON term.id = o.term_id")
+                .contains("LEFT JOIN school_service_plan plan")
+                .contains("term.status AS term_status")
+                .contains("plan.status AS plan_status")
+                .doesNotContain("FOR UPDATE");
+
+        BoundSql lockSql = configuration
+                .getMappedStatement(EnrollmentMapper.class.getName()
+                        + ".lockOffering")
+                .getBoundSql(Map.of("offeringId", 20L));
+        String lock = lockSql.getSql().replaceAll("\\s+", " ").trim();
+
+        assertThat(lock)
+                .contains("FROM course_offering o")
+                .contains("JOIN course c ON c.id = o.course_id")
+                .doesNotContain("academic_term")
+                .doesNotContain("school_service_plan")
+                .endsWith("FOR UPDATE");
+    }
+
+    @Test
     void scheduleConflictPrioritizesActualSessionsAndFallsBackOnlyForNoSessionOfferings()
             throws Exception {
         Configuration configuration = mapperConfiguration();

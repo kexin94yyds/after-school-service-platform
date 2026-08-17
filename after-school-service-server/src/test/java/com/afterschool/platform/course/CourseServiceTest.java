@@ -124,6 +124,66 @@ class CourseServiceTest {
     }
 
     @Test
+    void createsEveryNewOfferingInDraftState() {
+        when(currentUser.schoolScope(1L)).thenReturn(1L);
+        when(mapper.lockTeacher(1, 1)).thenReturn(1L);
+        when(mapper.lockActiveCourse(1, 1)).thenReturn(1L);
+        when(mapper.findTeacherConflict(
+                        1,
+                        null,
+                        2,
+                        LocalTime.of(16, 30),
+                        LocalTime.of(17, 30),
+                        LocalDate.of(2026, 9, 1),
+                        LocalDate.of(2027, 1, 31)))
+                .thenReturn(null);
+        when(mapper.insertOffering(
+                        1,
+                        1,
+                        1,
+                        "O-TEST",
+                        "2026-2027-1",
+                        2,
+                        LocalTime.of(16, 30),
+                        LocalTime.of(17, 30),
+                        LocalDate.of(2026, 9, 1),
+                        LocalDate.of(2027, 1, 31),
+                        LocalDateTime.of(2026, 8, 1, 8, 0),
+                        LocalDateTime.of(2026, 8, 31, 18, 0),
+                        20,
+                        "美术教室",
+                        "DRAFT",
+                        null,
+                        null,
+                        null))
+                .thenReturn(1);
+        when(mapper.findOfferingByCode(1, "O-TEST"))
+                .thenReturn(java.util.Map.of("id", 10L, "status", "DRAFT"));
+
+        service.createOffering(request("DRAFT"));
+
+        verify(mapper).insertOffering(
+                1,
+                1,
+                1,
+                "O-TEST",
+                "2026-2027-1",
+                2,
+                LocalTime.of(16, 30),
+                LocalTime.of(17, 30),
+                LocalDate.of(2026, 9, 1),
+                LocalDate.of(2027, 1, 31),
+                LocalDateTime.of(2026, 8, 1, 8, 0),
+                LocalDateTime.of(2026, 8, 31, 18, 0),
+                20,
+                "美术教室",
+                "DRAFT",
+                null,
+                null,
+                null);
+    }
+
+    @Test
     void freezesCourseCodeAndGradeRulesAfterOfferingExists() {
         when(currentUser.schoolScope(1L)).thenReturn(1L);
         when(mapper.lockCourse(7, 1)).thenReturn(7L);
@@ -244,14 +304,9 @@ class CourseServiceTest {
     }
 
     @Test
-    void cannotPublishOfferingBeforeLinkedPlanIsFiled() {
-        when(currentUser.schoolScope(1L)).thenReturn(1L);
-        when(academicMapper.lockTerm(2)).thenReturn(term());
-        ServicePlan plan = plan("SUBMITTED");
-        when(academicMapper.lockServicePlan(3, 1)).thenReturn(plan);
-
+    void rejectsCreatingOfferingOutsideDraftState() {
         assertCode(
-                "PLAN_NOT_FILED",
+                "INITIAL_OFFERING_STATUS_INVALID",
                 () -> service.createOffering(linkedRequest("PUBLISHED")));
 
         verify(mapper, never()).lockTeacher(1, 1);
@@ -270,14 +325,14 @@ class CourseServiceTest {
                 LocalDateTime.of(2026, 8, 31, 18, 0),
                 20,
                 "创客教室",
-                "PUBLISHED",
+                "DRAFT",
                 2L,
                 3L,
                 4L);
     }
 
     @Test
-    void rejectsRoomConflictForFiledPlanOffering() {
+    void rejectsRoomConflictForDraftOfferingLinkedToAFiledPlan() {
         when(currentUser.schoolScope(1L)).thenReturn(1L);
         when(academicMapper.lockTerm(2)).thenReturn(term());
         when(academicMapper.lockServicePlan(3, 1)).thenReturn(plan("FILED"));
@@ -306,7 +361,7 @@ class CourseServiceTest {
 
         assertCode(
                 "ROOM_SCHEDULE_CONFLICT",
-                () -> service.createOffering(linkedRequest("PUBLISHED")));
+                () -> service.createOffering(linkedRequest("DRAFT")));
     }
 
     private CourseController.OfferingRequest request(String status) {

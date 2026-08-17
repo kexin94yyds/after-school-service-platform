@@ -326,13 +326,18 @@ function openLeaveReview(item: LeaveRequest, decision: ReviewDecision): void {
 }
 
 async function submitLeaveReview(): Promise<void> {
-  if (!selectedLeave.value) return
+  if (!selectedLeave.value || reviewSaving.value) return
+  const remark = leaveReviewRemark.value.trim()
+  if (leaveDecision.value === 'REJECTED' && !remark) {
+    ElMessage.warning('请填写驳回原因。')
+    return
+  }
   reviewSaving.value = true
   try {
     await leaveCorrectionApi.reviewLeave(
       selectedLeave.value.id,
       leaveDecision.value,
-      leaveReviewRemark.value.trim() || null,
+      remark || null,
     )
     reviewDialogVisible.value = false
     ElMessage.success(leaveDecision.value === 'APPROVED' ? '请假已批准' : '请假已驳回')
@@ -811,7 +816,10 @@ onMounted(async () => {
         <p>{{ selectedLeave.reason }}</p>
       </div>
       <el-form label-position="top">
-        <el-form-item label="审核意见">
+        <el-form-item
+          label="审核意见"
+          :required="leaveDecision === 'REJECTED'"
+        >
           <el-input
             v-model="leaveReviewRemark"
             type="textarea"

@@ -21,6 +21,8 @@ public class EnrollmentOffering {
     private int enrolledCount;
     private String status;
     private String courseStatus;
+    private String termStatus;
+    private String planStatus;
 
     public long getId() {
         return id;
@@ -140,5 +142,21 @@ public class EnrollmentOffering {
 
     public void setCourseStatus(String courseStatus) {
         this.courseStatus = courseStatus;
+    }
+
+    public String getTermStatus() {
+        return termStatus;
+    }
+
+    public void setTermStatus(String termStatus) {
+        this.termStatus = termStatus;
+    }
+
+    public String getPlanStatus() {
+        return planStatus;
+    }
+
+    public void setPlanStatus(String planStatus) {
+        this.planStatus = planStatus;
     }
 }

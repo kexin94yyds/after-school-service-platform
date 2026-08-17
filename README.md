@@ -60,10 +60,10 @@
 
 验收脚本会自动：
 
-1. 运行后端测试，生成可执行 JAR 和 CycloneDX JSON SBOM。
+1. 运行后端测试，生成不含演示迁移的生产可执行 JAR、独立 demo JAR 和 CycloneDX JSON SBOM。
 2. 运行前端 Vitest、TypeScript 检查、生产构建、高危依赖审计，以及 Chromium 桌面/移动端 Playwright 浏览器验收。
 3. 在临时目录启动独立 MySQL 8.4，默认使用 `18306`，不会连接或修改本机 `3306` 数据库。
-4. 在空库执行生产迁移至 V12，再补入演示 V4/V8/V11，并验证 26 张业务表。
+4. 在空库执行生产迁移至 V13，再补入演示 V4/V4.1/V8/V11，并验证 26 张业务表、监管预警与扫描运行的外键完整性。
 5. 通过真实 HTTP Session 和 CSRF 跑通四角色权限、账号创建与改密、组织人员 CRUD、计划备案、资源排课/撤销调课、实际课次选课规则、最后名额并发、请假与撤回、考勤纠错与取消、预警整改与扫描运行留痕、评价、审计和报表。
 6. 重启后端验证 Flyway 幂等性，退出时清理临时数据库和进程。
 
@@ -96,20 +96,30 @@ GRANT ALL PRIVILEGES ON after_school_service.*
 
 ### 2. 启动后端
 
-演示模式会在生产功能迁移（当前至 V12）之外加载 V4 账号与基础数据、V8 全业务链虚构演示数据，以及 V11 简化登录凭据：
+生产 JAR 默认不包含 demo 的迁移、配置或刷新组件，不能通过单独设置 `demo` profile 获得或改写演示数据。演示必须构建并通过专用启动器运行独立的 demo JAR：它只会连接本机回环地址的专用 `after_school_demo` 数据库，并在启动前清除继承的 `DB_URL`、`DB_USERNAME`、`DB_PASSWORD` 与 Spring 数据源覆盖。先创建可随时删除的本机数据库和专用账号：
 
 ```bash
+mysql -u root -p <<'SQL'
+CREATE DATABASE after_school_demo
+  CHARACTER SET utf8mb4
+  COLLATE utf8mb4_0900_ai_ci;
+CREATE USER 'after_school_demo'@'127.0.0.1'
+  IDENTIFIED BY 'replace-with-a-demo-password';
+GRANT ALL PRIVILEGES ON after_school_demo.*
+  TO 'after_school_demo'@'127.0.0.1';
+FLUSH PRIVILEGES;
+SQL
+
 cd after-school-service-server
+mvn -B package -Pdemo-artifact
+cd ..
 
-export DB_URL='jdbc:mysql://127.0.0.1:3306/after_school_service?useUnicode=true&characterEncoding=UTF-8&connectionTimeZone=%2B08%3A00&forceConnectionTimeZoneToSession=true&allowPublicKeyRetrieval=true&useSSL=false'
-export DB_USERNAME='after_school'
-export DB_PASSWORD='replace-with-a-local-password'
-export SPRING_PROFILES_ACTIVE='demo'
-
-mvn spring-boot:run
+DEMO_DB_PASSWORD='replace-with-a-demo-password' \
+  ./scripts/run-demo.sh \
+  after-school-service-server/target/after-school-service-server-0.0.1-SNAPSHOT-demo.jar
 ```
 
-后端默认地址为 `http://localhost:8081`。
+可用 `DEMO_MYSQL_PORT` 和 `DEMO_DB_USERNAME` 覆盖本机 demo 端口与账号；不可用 `DB_URL`、`DB_USERNAME` 或 `DB_PASSWORD` 覆盖 demo 数据源。启动器会把应用与管理端点都固定在 `127.0.0.1`，避免含弱口令的演示服务暴露到局域网。不得把 `-demo.jar` 交给生产发布脚本，发布脚本会显式拒绝它。后端默认地址为 `http://localhost:8081`。
 
 ### 3. 启动前端
 
@@ -123,7 +133,7 @@ VITE_API_PROXY_TARGET=http://localhost:8081 npm run dev
 
 ## 演示账号
 
-以下账号只在 `demo` 模式或显式加载 `db/demo` 时存在，统一密码为 `123456`：
+以下账号只在按上述方式构建并启动的独立 demo 构件中存在，统一密码为 `123456`：
 
 | 角色 | 用户名 |
 | --- | --- |
@@ -143,6 +153,7 @@ VITE_API_PROXY_TARGET=http://localhost:8081 npm run dev
 - `db/migration/V2`：四类角色参考数据
 - `db/migration/V3`：跨租户复合外键、考勤关联与并发索引加固
 - `db/demo/V4`：可选演示学校、账号与基础工作流数据
+- `db/demo/V4.1`：为“先 V13、后启用 demo”的数据库预先补齐 V8 固定预警的扫描运行父记录
 - `db/migration/V5`：学期、服务计划、教室、校历、调课与资源冲突约束
 - `db/migration/V6`：请假、考勤纠错与不可变修订历史
 - `db/migration/V7`：监管预警、整改历史、操作审计与课程评价
@@ -151,10 +162,11 @@ VITE_API_PROXY_TARGET=http://localhost:8081 npm run dev
 - `db/migration/V10`：报名取消联动终止有效请假，同时保留既有审核轨迹
 - `db/demo/V11`：把演示监管账号调整为 `admin`，并统一使用便于答辩演示的简短密码
 - `db/migration/V12`：新增监管扫描运行历史、计划任务系统操作人与跨实例重入防护
+- `db/migration/V13`：回填所有历史预警的扫描运行父记录，并以外键约束 `supervision_alert.scan_run_id`
 
-默认和 `prod` 模式只加载生产迁移，在空库上依次执行 V1、V2、V3、V5、V6、V7、V9、V10、V12，不创建任何学校、人员或演示账号；这两种模式保持 Flyway 严格顺序，不允许过期版本迁移。`demo` 模式额外加载 V4、V8、V11，并且仅在该 profile 中开启 Flyway out-of-order：因此同一数据库即使已先以默认或 `prod` 模式迁移到生产 V12，切换到 `demo` 后仍会补执行 V4、V8、V11。服务端会拒绝同时启用 `prod,demo`，也会在配置绑定和实际迁移前两次拒绝任何将生产 Flyway out-of-order 改为 `true` 的外部覆盖。
+默认和 `prod` 模式只加载生产迁移，在空库上依次执行 V1、V2、V3、V5、V6、V7、V9、V10、V12、V13，不创建任何学校、人员或演示账号；这两种模式保持 Flyway 严格顺序，不允许过期版本迁移。常规构建产物在归档层再次排除 demo 的迁移、profile 配置和刷新组件，即使曾在同一 `target/` 目录构建 demo，也不能被生产 JAR 复用。
 
-V4、V8、V11 使用固定的虚构演示标识，只能写入空白或可随时丢弃的数据库。不要把 `demo` profile 指向已有真实业务数据的生产库；需要演示时，应新建独立数据库后再启动。
+`demo-artifact` profile 额外加载 V4、V4.1、V8、V11，并且仅在 demo JAR 的 `demo` profile 中开启 Flyway out-of-order：因此同一数据库即使已先以默认或 `prod` 模式迁移到 V13，切换到专用 demo JAR 后仍会按 V4、V4.1、V8、V11 补入虚构数据；V4.1 会先创建 V8 预警的父扫描记录，使新增外键不被绕过。V4、V8、V11 使用固定的虚构演示标识，只能写入空白或可随时丢弃的本机 `after_school_demo` 库。不要直接运行 demo JAR 或把它指向已有真实业务库；只使用 `scripts/run-demo.sh`。
 
 ## 生产部署（同源 Nginx）
 
@@ -242,7 +254,7 @@ test "$(curl -sS -o /dev/null -w '%{http_code}' https://after-school.example/.en
 
 ### 6. 备份、监控与回滚
 
-[`scripts/backup-mysql.sh`](scripts/backup-mysql.sh) 把 MySQL 8.4 在线导出直接压缩并用 age 公钥加密，明文 SQL 不落盘；[`scripts/restore-mysql-backup.sh`](scripts/restore-mysql-backup.sh) 只允许恢复到尚不存在的新库。systemd timer 默认每日备份、每 5 分钟检查 readiness 和备份新鲜度。
+[`scripts/backup-mysql.sh`](scripts/backup-mysql.sh) 把 MySQL 8.4 在线导出直接压缩并用 age 公钥加密，明文 SQL 不落盘；[`scripts/restore-mysql-backup.sh`](scripts/restore-mysql-backup.sh) 只允许恢复到尚不存在的新库，并要求成功 Flyway 历史至少包含 V13、核心表、关键租户/监管外键和零条预警扫描运行孤儿记录。systemd timer 在每日 `00:15` 和 `12:15` 各运行一次，最多随机延迟 15 分钟；健康检查每 5 分钟验证 `MYSQL_DATABASE` 对应备份的 SHA-256 和新鲜度，18 小时未成功即告警，为 RPO 不超过 24 小时预留约 6 小时的修复窗口。
 
 正式公网前必须完成一次真实恢复演练、配置异机备份上传和外部 FAILED/RECOVERED 告警。后端用 [`scripts/select-server-release.sh`](scripts/select-server-release.sh) 回滚，前端用 [`scripts/select-web-release.sh`](scripts/select-web-release.sh) 选择旧版本。JAR 回滚不等于数据库迁移回滚；Flyway 变更必须向后兼容。
 

@@ -90,6 +90,14 @@
         FOR UPDATE
     </select>
 
+    <select id="lockTermOfferings" resultType="long">
+        SELECT id
+        FROM course_offering
+        WHERE term_id = #{termId}
+        ORDER BY id
+        FOR UPDATE
+    </select>
+
     <insert id="insertTerm">
         INSERT INTO academic_term (
             term_code, term_name, start_date, end_date, status, created_by
@@ -174,6 +182,14 @@
         FROM school_service_plan
         WHERE id = #{id}
           AND school_id = #{schoolId}
+        FOR UPDATE
+    </select>
+
+    <select id="lockPlanOfferings" resultType="long">
+        SELECT id
+        FROM course_offering
+        WHERE plan_id = #{planId}
+        ORDER BY id
         FOR UPDATE
     </select>
 

@@ -80,6 +80,7 @@ const historyLoading = ref(false)
 const historyError = ref('')
 const historyAlert = ref<SupervisionAlert | null>(null)
 const history = ref<SupervisionAction[]>([])
+let historyLoadVersion = 0
 
 const pageCopy = computed(() =>
   props.mode === 'regulator'
@@ -323,18 +324,33 @@ async function submitTransition(): Promise<void> {
 }
 
 async function openHistory(alert: SupervisionAlert): Promise<void> {
+  const requestVersion = ++historyLoadVersion
   historyAlert.value = alert
   historyVisible.value = true
   historyLoading.value = true
   historyError.value = ''
   history.value = []
   try {
-    history.value = await supervisionApi.history(alert.id)
+    const rows = await supervisionApi.history(alert.id)
+    if (
+      requestVersion === historyLoadVersion &&
+      historyVisible.value &&
+      historyAlert.value?.id === alert.id
+    ) {
+      history.value = rows
+    }
   } catch (loadError) {
-    historyError.value = getErrorMessage(loadError, '预警处理历史加载失败。')
+    if (requestVersion === historyLoadVersion) {
+      historyError.value = getErrorMessage(loadError, '预警处理历史加载失败。')
+    }
   } finally {
-    historyLoading.value = false
+    if (requestVersion === historyLoadVersion) historyLoading.value = false
   }
+}
+
+function invalidateHistoryLoad(): void {
+  ++historyLoadVersion
+  historyLoading.value = false
 }
 
 function openScan(): void {
@@ -780,6 +796,7 @@ onMounted(async () => {
       v-model="historyVisible"
       :title="historyAlert ? `预警 #${historyAlert.id} 处理记录` : '处理记录'"
       size="min(560px, 94vw)"
+      @close="invalidateHistoryLoad"
     >
       <section v-if="historyAlert" class="history-summary">
         <span>{{ historyAlert.schoolName }}</span>

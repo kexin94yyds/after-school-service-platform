@@ -8,12 +8,15 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.FieldError;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
@@ -34,6 +37,16 @@ public class ApiExceptionHandler {
         }
         return ResponseEntity.badRequest()
                 .body(error("VALIDATION_FAILED", "提交内容校验失败", fields));
+    }
+
+    @ExceptionHandler({
+            HttpMessageNotReadableException.class,
+            MethodArgumentTypeMismatchException.class,
+            MissingServletRequestParameterException.class
+    })
+    ResponseEntity<Map<String, Object>> handleRequestParsing(Exception exception) {
+        return ResponseEntity.badRequest()
+                .body(error("INVALID_REQUEST", "请求参数或内容格式不正确", null));
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)

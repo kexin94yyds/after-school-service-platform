@@ -89,6 +89,30 @@ class EnrollmentRuleEngineTest {
     }
 
     @Test
+    void rejectsEnrollmentWhenLinkedTermIsClosed() {
+        offering.setTermStatus("CLOSED");
+        assertCode("TERM_CLOSED", () ->
+                rules.validate(student, offering, null, false, NOW));
+    }
+
+    @Test
+    void rejectsEnrollmentWhenLinkedServicePlanIsClosed() {
+        offering.setTermStatus("ACTIVE");
+        offering.setPlanStatus("CLOSED");
+        assertCode("SERVICE_PLAN_CLOSED", () ->
+                rules.validate(student, offering, null, false, NOW));
+    }
+
+    @Test
+    void allowsEnrollmentWhenLinkedServicePlanIsFiled() {
+        offering.setTermStatus("ACTIVE");
+        offering.setPlanStatus("FILED");
+
+        assertThatCode(() -> rules.validate(student, offering, null, false, NOW))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
     void rejectsEnrollmentAfterFirstSessionStarts() {
         offering.setEnrollmentEnd(LocalDateTime.of(2026, 12, 31, 23, 59));
         assertCode("ENROLLMENT_CLOSED_AFTER_START", () ->

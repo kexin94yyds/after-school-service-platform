@@ -1,9 +1,9 @@
 [Unit]
-Description=Run the encrypted after-school service backup every day
+Description=Run the encrypted after-school service backup twice daily
 
 [Timer]
-OnCalendar=*-*-* 02:30:00
-RandomizedDelaySec=30m
+OnCalendar=*-*-* 00,12:15:00
+RandomizedDelaySec=15m
 AccuracySec=1m
 Persistent=true
 Unit=after-school-backup.service

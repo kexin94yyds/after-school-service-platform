@@ -115,6 +115,7 @@ class EnrollmentServiceTest {
         EnrollmentOffering offering = offering();
         offering.setStartDate(LocalDate.of(2026, 9, 15));
         when(mapper.lockOffering(20)).thenReturn(offering);
+        when(mapper.findOffering(20)).thenReturn(offering);
         when(mapper.lockGuardianStudent(10, 8)).thenReturn(student());
         when(mapper.findFirstValidSessionStart(20))
                 .thenReturn(LocalDateTime.of(2026, 9, 10, 15, 0));
@@ -125,6 +126,7 @@ class EnrollmentServiceTest {
 
         InOrder locks = inOrder(mapper);
         locks.verify(mapper).lockOffering(20);
+        locks.verify(mapper).findOffering(20);
         locks.verify(mapper).lockGuardianStudent(10, 8);
         verify(mapper, never()).incrementCapacity(20);
     }
@@ -136,6 +138,7 @@ class EnrollmentServiceTest {
         EnrollmentOffering offering = offering();
         offering.setStartDate(LocalDate.of(2026, 9, 15));
         when(mapper.lockOffering(20)).thenReturn(offering);
+        when(mapper.findOffering(20)).thenReturn(offering);
         when(mapper.lockGuardianStudent(10, 8)).thenReturn(student());
         when(mapper.findFirstValidSessionStart(20)).thenReturn(null);
         when(mapper.incrementCapacity(20)).thenReturn(1);
@@ -154,6 +157,7 @@ class EnrollmentServiceTest {
         EnrollmentOffering offering = offering();
         offering.setStartDate(LocalDate.of(2026, 9, 15));
         when(mapper.lockOffering(20)).thenReturn(offering);
+        when(mapper.findOffering(20)).thenReturn(offering);
         when(mapper.lockGuardianStudent(10, 8)).thenReturn(student());
         when(mapper.findFirstValidSessionStart(20))
                 .thenReturn(LocalDateTime.of(2026, 9, 15, 16, 30));
@@ -163,6 +167,28 @@ class EnrollmentServiceTest {
                 "STUDENT_SCHEDULE_CONFLICT",
                 () -> service.enroll(new EnrollmentController.EnrollmentRequest(10, 20)));
 
+        verify(mapper, never()).incrementCapacity(20);
+    }
+
+    @Test
+    void readsClosedParentStatusAfterLockingOfferingAndRejectsEnrollment() {
+        PlatformPrincipal principal = guardianPrincipal();
+        when(currentUser.principal()).thenReturn(principal);
+        EnrollmentOffering lockedOffering = offering();
+        EnrollmentOffering offeringWithParentState = offering();
+        offeringWithParentState.setTermStatus("CLOSED");
+        when(mapper.lockOffering(20)).thenReturn(lockedOffering);
+        when(mapper.findOffering(20)).thenReturn(offeringWithParentState);
+        when(mapper.lockGuardianStudent(10, 8)).thenReturn(student());
+
+        assertCode(
+                "TERM_CLOSED",
+                () -> service.enroll(new EnrollmentController.EnrollmentRequest(10, 20)));
+
+        InOrder operations = inOrder(mapper);
+        operations.verify(mapper).lockOffering(20);
+        operations.verify(mapper).findOffering(20);
+        operations.verify(mapper).lockGuardianStudent(10, 8);
         verify(mapper, never()).incrementCapacity(20);
     }
 

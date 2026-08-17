@@ -44,11 +44,11 @@ public class EvaluationService {
             throw ApiException.forbidden("当前家长账号没有学校数据权限");
         }
         long schoolId = principal.schoolId();
-        // Global write lock order is student -> offering -> enrollment.
+        // Global write lock order is offering -> student -> enrollment.
         // Re-checking eligibility after both parent rows are locked prevents
         // cancellation and offering shutdown from racing evaluation creation.
-        if (mapper.lockStudent(studentId, schoolId) == null
-                || mapper.lockOffering(offeringId, schoolId) == null) {
+        if (mapper.lockOffering(offeringId, schoolId) == null
+                || mapper.lockStudent(studentId, schoolId) == null) {
             throw ApiException.badRequest(
                     "EVALUATION_NOT_ELIGIBLE",
                     "仅可评价已有效报名且已有完成课次的绑定学生课程");

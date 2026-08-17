@@ -137,4 +137,25 @@ describe('ChangePasswordDialog', () => {
     expect(wrapper.emitted('success')).toHaveLength(1)
     expect(wrapper.emitted('update:modelValue')).toContainEqual([false])
   })
+
+  it('ignores a second submit while the password change is pending', async () => {
+    let resolveChange: (() => void) | undefined
+    changePasswordMock.mockImplementation(
+      () => new Promise<void>((resolve) => {
+        resolveChange = resolve
+      }),
+    )
+    const wrapper = mountDialog()
+    const inputs = wrapper.findAll('input')
+
+    await inputs[0].setValue('current-secret')
+    await inputs[1].setValue('new-secret-1234')
+    await inputs[2].setValue('new-secret-1234')
+    await wrapper.find('form').trigger('submit')
+    await wrapper.find('form').trigger('submit')
+
+    expect(changePasswordMock).toHaveBeenCalledTimes(1)
+    resolveChange?.()
+    await flushPromises()
+  })
 })

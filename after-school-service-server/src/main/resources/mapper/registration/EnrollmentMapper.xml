@@ -26,6 +26,8 @@
         <result property="enrolledCount" column="enrolled_count"/>
         <result property="status" column="status"/>
         <result property="courseStatus" column="course_status"/>
+        <result property="termStatus" column="term_status"/>
+        <result property="planStatus" column="plan_status"/>
     </resultMap>
 
     <resultMap id="state" type="com.afterschool.platform.registration.EnrollmentState">
@@ -114,6 +116,26 @@
         o.capacity,
         o.enrolled_count,
         o.status,
+        c.status AS course_status,
+        term.status AS term_status,
+        plan.status AS plan_status
+    </sql>
+
+    <sql id="offeringLockColumns">
+        o.id,
+        o.school_id,
+        c.target_grade_min,
+        c.target_grade_max,
+        o.week_day,
+        o.start_time,
+        o.end_time,
+        o.start_date,
+        o.end_date,
+        o.enrollment_start,
+        o.enrollment_end,
+        o.capacity,
+        o.enrolled_count,
+        o.status,
         c.status AS course_status
     </sql>
 
@@ -121,11 +143,16 @@
         SELECT <include refid="offeringRuleColumns"/>
         FROM course_offering o
         JOIN course c ON c.id = o.course_id
+        LEFT JOIN academic_term term ON term.id = o.term_id
+        LEFT JOIN school_service_plan plan
+          ON plan.id = o.plan_id
+         AND plan.school_id = o.school_id
+         AND plan.term_id = o.term_id
         WHERE o.id = #{offeringId}
     </select>
 
     <select id="lockOffering" resultMap="offering">
-        SELECT <include refid="offeringRuleColumns"/>
+        SELECT <include refid="offeringLockColumns"/>
         FROM course_offering o
         JOIN course c ON c.id = o.course_id
         WHERE o.id = #{offeringId}

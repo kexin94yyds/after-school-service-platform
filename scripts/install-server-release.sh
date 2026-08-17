@@ -40,6 +40,11 @@ command -v jar >/dev/null 2>&1 || fail "JDK jar command not found"
 # by some deployment workstations.
 jar tf "${jar_file}" >/dev/null \
   || fail "JAR archive validation failed"
+if [[ "$(basename -- "${jar_file}")" == *-demo.jar ]] \
+    || jar tf "${jar_file}" | grep -Eq \
+      '^BOOT-INF/classes/(db/demo/|application-demo\.yml$|com/afterschool/platform/demo/DemoTimelineRefresher\.class$)'; then
+  fail "production release JAR must not package demo payload"
+fi
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 selector="${script_dir}/select-server-release.sh"

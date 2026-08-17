@@ -19,6 +19,22 @@ async function signOut(page: Page): Promise<void> {
   await expect(page).toHaveURL(/\/login$/)
 }
 
+test('登录页按回车只发送一次认证请求', async ({ page }) => {
+  let loginRequests = 0
+  page.on('request', (request) => {
+    if (request.url().includes('/api/auth/login')) loginRequests += 1
+  })
+
+  await page.goto('/login')
+  await page.getByPlaceholder('请输入登录账号').fill('admin')
+  const password = page.getByPlaceholder('请输入登录密码')
+  await password.fill(demoPassword)
+  await password.press('Enter')
+
+  await expect(page).toHaveURL(/\/regulator$/)
+  expect(loginRequests).toBe(1)
+})
+
 test('四角色核心页面与越权路由按服务端角色工作', async ({ page }) => {
   await signIn(page, 'admin', /\/regulator$/)
   await expect(page.getByRole('heading', { name: '课后服务运行总览' })).toBeVisible()

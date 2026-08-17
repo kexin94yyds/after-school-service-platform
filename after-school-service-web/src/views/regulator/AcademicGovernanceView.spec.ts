@@ -3,6 +3,10 @@ import { describe, expect, it } from 'vitest'
 import source from './AcademicGovernanceView.vue?raw'
 
 describe('AcademicGovernanceView term actions', () => {
+  it('only offers DRAFT when creating a term', () => {
+    expect(source).toContain("if (!current) {\n    return [{ label: '草稿', value: 'DRAFT' }]")
+  })
+
   it('keeps selection and editing as sibling native buttons', () => {
     const termTrack = source.match(
       /<div v-loading="baseLoading" class="term-track">([\s\S]*?)<div v-if="!baseLoading/,
