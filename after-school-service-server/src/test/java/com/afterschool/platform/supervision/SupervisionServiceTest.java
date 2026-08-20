@@ -67,9 +67,9 @@ class SupervisionServiceTest {
                 .thenReturn(1);
         when(mapper.completeScanRun(
                 anyString(), eq(NOW), eq(2), eq(1))).thenReturn(1);
-        AlertDraft created = draft("OVERDUE_ATTENDANCE", "SESSION:10");
+        AlertDraft created = draft("MISSING_ATTENDANCE", "SESSION:10");
         AlertDraft duplicate = draft("LOW_ATTENDANCE", "OFFERING:11");
-        when(mapper.findOverdueAttendanceCandidates(1L, 2L, NOW))
+        when(mapper.findMissingAttendanceCandidates(1L, 2L, NOW))
                 .thenReturn(List.of(created));
         when(mapper.findOfferingsWithoutSessions(1L, 2L, NOW))
                 .thenReturn(List.of());
@@ -91,7 +91,7 @@ class SupervisionServiceTest {
                         anyString()))
                 .thenReturn(0);
         when(mapper.findAlertIdentityByDedup(
-                        1, "OVERDUE_ATTENDANCE", "SESSION:10"))
+                        1, "MISSING_ATTENDANCE", "SESSION:10"))
                 .thenAnswer(invocation -> identity(100, scanRunId.get()));
         when(mapper.findAlertIdentityByDedup(
                         1, "LOW_ATTENDANCE", "OFFERING:11"))
@@ -130,9 +130,9 @@ class SupervisionServiceTest {
                 .thenReturn(1);
         when(mapper.completeScanRun(
                 anyString(), eq(NOW), eq(1), eq(1))).thenReturn(1);
-        AlertDraft created = draft("OVERDUE_ATTENDANCE", "SESSION:10");
+        AlertDraft created = draft("MISSING_ATTENDANCE", "SESSION:10");
         AtomicReference<String> scanRunId = new AtomicReference<>();
-        when(mapper.findOverdueAttendanceCandidates(null, null, NOW))
+        when(mapper.findMissingAttendanceCandidates(null, null, NOW))
                 .thenReturn(List.of(created));
         when(mapper.findOfferingsWithoutSessions(null, null, NOW))
                 .thenReturn(List.of());
@@ -148,7 +148,7 @@ class SupervisionServiceTest {
                     return 1;
                 });
         when(mapper.findAlertIdentityByDedup(
-                        1, "OVERDUE_ATTENDANCE", "SESSION:10"))
+                        1, "MISSING_ATTENDANCE", "SESSION:10"))
                 .thenAnswer(invocation -> identity(100, scanRunId.get()));
 
         service.scanScheduled();
@@ -170,7 +170,7 @@ class SupervisionServiceTest {
         when(mapper.insertScanRun(
                 anyString(), eq("SCHEDULED"), eq(NOW), isNull()))
                 .thenReturn(1);
-        when(mapper.findOverdueAttendanceCandidates(null, null, NOW))
+        when(mapper.findMissingAttendanceCandidates(null, null, NOW))
                 .thenThrow(new IllegalStateException("database unavailable"));
         when(mapper.failScanRun(
                 anyString(), eq(NOW), eq("扫描未完成，系统异常")))
@@ -282,6 +282,7 @@ class SupervisionServiceTest {
         alert.setSchoolId(3);
         alert.setStatus("OPEN");
         when(mapper.lockAlert(8, 3L)).thenReturn(alert);
+        when(mapper.countRectificationNotice(8)).thenReturn(1);
         when(mapper.updateStatus(8, "OPEN", "ACKNOWLEDGED"))
                 .thenReturn(1);
         when(mapper.listAlerts(3L, null, null, null, null))
@@ -302,6 +303,25 @@ class SupervisionServiceTest {
                 "学校已接收并安排负责人",
                 12L,
                 "SCHOOL_ADMIN");
+    }
+
+    @Test
+    void schoolCannotSubmitVerificationWithoutUploadedMaterial() {
+        when(principal.roleCode()).thenReturn("SCHOOL_ADMIN");
+        when(principal.schoolId()).thenReturn(3L);
+        SupervisionAlert alert = new SupervisionAlert();
+        alert.setId(8);
+        alert.setSchoolId(3);
+        alert.setStatus("RECTIFYING");
+        when(mapper.lockAlert(8, 3L)).thenReturn(alert);
+
+        assertThatThrownBy(() -> service.transition(
+                        8, "WAITING_VERIFY", "整改完成"))
+                .isInstanceOf(ApiException.class)
+                .extracting(exception -> ((ApiException) exception).code())
+                .isEqualTo("RECTIFICATION_MATERIAL_REQUIRED");
+
+        verify(mapper, never()).updateStatus(8, "RECTIFYING", "WAITING_VERIFY");
     }
 
     @Test

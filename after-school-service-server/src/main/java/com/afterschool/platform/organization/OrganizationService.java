@@ -29,6 +29,60 @@ public class OrganizationService {
         return mapper.listSchools(currentUser.optionalSchoolScope(null));
     }
 
+    public List<Map<String, Object>> regulators() {
+        return mapper.listRegulators();
+    }
+
+    @Transactional
+    public Map<String, Object> createRegulator(
+            OrganizationController.RegulatorRequest request) {
+        if (request.password() == null || request.password().isBlank()) {
+            throw ApiException.badRequest(
+                    "PASSWORD_REQUIRED", "创建监管账号时必须设置初始密码");
+        }
+        requireSchools(request.schoolIds());
+        String username = request.username().strip();
+        mapper.insertRegulator(
+                username,
+                passwordEncoder.encode(request.password()),
+                request.displayName().strip(),
+                trimToNull(request.mobile()),
+                request.enabled());
+        Map<String, Object> created = mapper.findRegulatorByUsername(username);
+        if (created == null || !(created.get("id") instanceof Number id)) {
+            throw ApiException.conflict(
+                    "REGULATOR_NOT_CREATED", "监管账号未能创建");
+        }
+        replaceRegulatorScopes(id.longValue(), request.schoolIds());
+        return mapper.findRegulator(id.longValue());
+    }
+
+    @Transactional
+    public Map<String, Object> updateRegulator(
+            long id,
+            OrganizationController.RegulatorRequest request) {
+        if (id == currentUser.principal().id() && !request.enabled()) {
+            throw ApiException.conflict(
+                    "SELF_DISABLE_NOT_ALLOWED", "不能停用当前登录的监管账号");
+        }
+        requireSchools(request.schoolIds());
+        String passwordHash = request.password() == null || request.password().isBlank()
+                ? null
+                : passwordEncoder.encode(request.password());
+        if (mapper.updateRegulator(
+                        id,
+                        request.username().strip(),
+                        request.displayName().strip(),
+                        trimToNull(request.mobile()),
+                        request.enabled(),
+                        passwordHash)
+                != 1) {
+            throw ApiException.notFound("监管账号不存在");
+        }
+        replaceRegulatorScopes(id, request.schoolIds());
+        return mapper.findRegulator(id);
+    }
+
     @Transactional
     public Map<String, Object> createSchool(OrganizationController.SchoolRequest request) {
         mapper.insertSchool(
@@ -162,6 +216,26 @@ public class OrganizationService {
         AuditTargetContext.setTargetSchoolId(schoolId);
         if (mapper.schoolExists(schoolId) != 1) {
             throw ApiException.notFound("学校不存在");
+        }
+    }
+
+    private void requireSchools(List<Long> schoolIds) {
+        long distinct = schoolIds.stream().distinct().count();
+        if (distinct != schoolIds.size()
+                || mapper.countSchools(schoolIds) != schoolIds.size()) {
+            throw ApiException.badRequest(
+                    "INVALID_REGULATOR_SCOPE",
+                    "监管范围中的学校必须存在且不能重复");
+        }
+    }
+
+    private void replaceRegulatorScopes(
+            long regulatorUserId,
+            List<Long> schoolIds) {
+        mapper.deleteRegulatorScopes(regulatorUserId);
+        long actorId = currentUser.principal().id();
+        for (long schoolId : schoolIds) {
+            mapper.insertRegulatorScope(regulatorUserId, schoolId, actorId);
         }
     }
 }

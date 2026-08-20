@@ -13,18 +13,20 @@
 
 | 角色 | 主要能力 |
 | --- | --- |
-| 监管人员 | 管理学校与管理员账号、维护学期、审核学校服务计划、扫描监管预警、复核整改、查看跨校分析与脱敏评价、查询操作审计 |
-| 学校管理员 | 管理本校组织人员、服务计划、教室校历、课程开班、报名、课次调课、考勤、请假与纠错审批、整改、统计和审计 |
+| 监管人员 | 管理监管/学校管理员账号与负责学校、维护学期、审核含课程规模和师资明细的服务计划、接收监管通知、下发整改、复核材料、查看跨校分析与审计 |
+| 学校管理员 | 管理本校组织人员、服务计划明细、教室校历、课程 Excel 导入导出、课程开班、报名名单、考勤、整改材料、统计和审计 |
 | 教师 | 仅查看本人开班与课次，生成课次、登记考勤、审核本人课程请假、申请已完成考勤纠错 |
-| 家长 | 仅查看绑定学生，选课/退选、查看出勤、按未来课次请假、对具备完成课次的有效报名提交一次课程评价 |
+| 家长 | 仅查看绑定学生，选课/退选/原子改选、查看逐课次与月度考勤、按未来课次请假、分别评价课程和教师 |
 
 主要业务闭环：
 
-- 学校服务计划按 `草稿 → 已提交 → 已备案 → 已生效 → 已结束 → 已归档` 流转，退回时必须说明原因。
-- 开班可关联标准学期、备案计划和教室；发布与调课同时校验学期范围、计划状态、教室容量、教师、教室、校历和全体已报学生冲突；最新生效调课可在重新校验后撤销。
+- 学校服务计划按 `草稿 → 已提交 → 已备案 → 已生效 → 已结束 → 已归档` 流转；提交前必须填写课程类型、计划课程/开班数、单班规模和师资人数。
+- 开班发布必须关联标准学期、已备案计划和启用教室；后端与选课规则双重拒绝未备案开课，并校验教室容量、教师/教室/学生冲突。
 - 家长在开课前提交请假，批准结果自动预填考勤名单。
 - 已完成课次的考勤禁止直接覆盖；教师发起纠错、学校审批后，原值和新值写入不可变修订历史。
-- 监管扫描识别考勤逾期、未生成课次和低出勤率，默认每日 02:00（Asia/Shanghai）自动执行，并保留手工/定时来源、成败、失败摘要与操作人；预警按“确认—整改—提交复核—关闭/退回”形成闭环。
+- 监管扫描覆盖超额开班、师资不足、考勤缺失、未备案开课，并保留未生成课次和低出勤率增强规则；默认每日 02:00 自动执行，向负责学校的监管账号生成站内通知。
+- 监管人员下发限期整改通知，学校上传 PDF/JPG/PNG 材料后才能提交复核；通知、材料版本、SHA-256、处理动作和关闭/退回全过程留痕。
+- 课程、选课名单、课程绩效和违规整改均支持真实 XLSX；课程还支持模板化批量导入，导入文件限制行列、大小和 XML/ZIP 安全边界。
 - 所有成功写操作保存去敏审计元数据，不记录请求正文或密码；家长评价在监管端自动去除学生、家长和评论明细。
 
 即时选课会同时校验：
@@ -50,7 +52,7 @@
 - Node.js `^22.18.0` 或 `>=24.11.0`
 - MySQL 8.4 安装在 `/opt/homebrew/opt/mysql@8.4`，或通过 `AFTER_SCHOOL_MYSQL84_HOME` 指定
 - `curl`、`jq`、`lsof`、`rsync`
-- Playwright Chromium（首次在前端目录执行 `npx playwright install chromium`）
+- Playwright Chromium，或本机 Google Chrome；无系统 Chrome 时首次执行 `npx playwright install chromium`
 
 执行：
 
@@ -63,16 +65,17 @@
 1. 运行后端测试，生成不含演示迁移的生产可执行 JAR、独立 demo JAR 和 CycloneDX JSON SBOM。
 2. 运行前端 Vitest、TypeScript 检查、生产构建、高危依赖审计，以及 Chromium 桌面/移动端 Playwright 浏览器验收。
 3. 在临时目录启动独立 MySQL 8.4，默认使用 `18306`，不会连接或修改本机 `3306` 数据库。
-4. 在空库执行生产迁移至 V13，再补入演示 V4/V4.1/V8/V11，并验证 26 张业务表、监管预警与扫描运行的外键完整性。
-5. 通过真实 HTTP Session 和 CSRF 跑通四角色权限、账号创建与改密、组织人员 CRUD、计划备案、资源排课/撤销调课、实际课次选课规则、最后名额并发、请假与撤回、考勤纠错与取消、预警整改与扫描运行留痕、评价、审计和报表。
+4. 在空库执行生产迁移至 V14，再补入演示 V4/V4.1/V8/V11/V15，并验证 32 张业务表及新增计划、通知、报名历史和整改材料外键。
+5. 通过真实 HTTP Session 和 CSRF 跑通四角色权限、监管账号开户注册、计划明细与备案强约束、Excel 导入导出、原子改选、月度考勤、四类预警、通知、整改附件、双维评价和多维报表。
 6. 重启后端验证 Flyway 幂等性，退出时清理临时数据库和进程。
 
 如默认验收端口被占用，可覆盖：
 
 ```bash
-AFTER_SCHOOL_VERIFY_SERVER_PORT=18082 \
-AFTER_SCHOOL_VERIFY_MYSQL_PORT=18307 \
-AFTER_SCHOOL_VERIFY_WEB_PORT=15174 \
+AFTER_SCHOOL_VERIFY_SERVER_PORT=19081 \
+AFTER_SCHOOL_VERIFY_MANAGEMENT_PORT=19082 \
+AFTER_SCHOOL_VERIFY_MYSQL_PORT=19306 \
+AFTER_SCHOOL_VERIFY_WEB_PORT=16174 \
 ./scripts/verify.sh
 ```
 
@@ -119,7 +122,7 @@ DEMO_DB_PASSWORD='replace-with-a-demo-password' \
   after-school-service-server/target/after-school-service-server-0.0.1-SNAPSHOT-demo.jar
 ```
 
-可用 `DEMO_MYSQL_PORT` 和 `DEMO_DB_USERNAME` 覆盖本机 demo 端口与账号；不可用 `DB_URL`、`DB_USERNAME` 或 `DB_PASSWORD` 覆盖 demo 数据源。启动器会把应用与管理端点都固定在 `127.0.0.1`，避免含弱口令的演示服务暴露到局域网。不得把 `-demo.jar` 交给生产发布脚本，发布脚本会显式拒绝它。后端默认地址为 `http://localhost:8081`。
+可用 `DEMO_MYSQL_PORT`、`DEMO_DB_USERNAME` 和 `DEMO_MANAGEMENT_PORT` 覆盖本机 demo 数据库端口、账号和管理端口；不可用 `DB_URL`、`DB_USERNAME` 或 `DB_PASSWORD` 覆盖 demo 数据源。启动器把应用和管理端点固定在 `127.0.0.1`，默认分别使用 `8081`、`8082`。不得把 `-demo.jar` 交给生产发布脚本。
 
 ### 3. 启动前端
 
@@ -153,7 +156,7 @@ VITE_API_PROXY_TARGET=http://localhost:8081 npm run dev
 - `db/migration/V2`：四类角色参考数据
 - `db/migration/V3`：跨租户复合外键、考勤关联与并发索引加固
 - `db/demo/V4`：可选演示学校、账号与基础工作流数据
-- `db/demo/V4.1`：为“先 V13、后启用 demo”的数据库预先补齐 V8 固定预警的扫描运行父记录
+- `db/demo/V4.1`：为“先 V14、后启用 demo”的数据库预先补齐 V8 固定预警的扫描运行父记录
 - `db/migration/V5`：学期、服务计划、教室、校历、调课与资源冲突约束
 - `db/migration/V6`：请假、考勤纠错与不可变修订历史
 - `db/migration/V7`：监管预警、整改历史、操作审计与课程评价
@@ -163,10 +166,12 @@ VITE_API_PROXY_TARGET=http://localhost:8081 npm run dev
 - `db/demo/V11`：把演示监管账号调整为 `admin`，并统一使用便于答辩演示的简短密码
 - `db/migration/V12`：新增监管扫描运行历史、计划任务系统操作人与跨实例重入防护
 - `db/migration/V13`：回填所有历史预警的扫描运行父记录，并以外键约束 `supervision_alert.scan_run_id`
+- `db/migration/V14`：计划明细、监管负责学校与通知、报名动作历史、整改通知/附件、双维评价和四类指定预警
+- `db/demo/V15`：为演示开班补齐标准学期、备案计划、教室、计划明细、监管范围和双维评价数据
 
-默认和 `prod` 模式只加载生产迁移，在空库上依次执行 V1、V2、V3、V5、V6、V7、V9、V10、V12、V13，不创建任何学校、人员或演示账号；这两种模式保持 Flyway 严格顺序，不允许过期版本迁移。常规构建产物在归档层再次排除 demo 的迁移、profile 配置和刷新组件，即使曾在同一 `target/` 目录构建 demo，也不能被生产 JAR 复用。
+默认和 `prod` 模式只加载生产迁移，在空库上执行至 V14，不创建任何学校、人员或演示账号；两种模式保持 Flyway 严格顺序。常规构建产物在归档层再次排除 demo 迁移、profile 配置和刷新组件。
 
-`demo-artifact` profile 额外加载 V4、V4.1、V8、V11，并且仅在 demo JAR 的 `demo` profile 中开启 Flyway out-of-order：因此同一数据库即使已先以默认或 `prod` 模式迁移到 V13，切换到专用 demo JAR 后仍会按 V4、V4.1、V8、V11 补入虚构数据；V4.1 会先创建 V8 预警的父扫描记录，使新增外键不被绕过。V4、V8、V11 使用固定的虚构演示标识，只能写入空白或可随时丢弃的本机 `after_school_demo` 库。不要直接运行 demo JAR 或把它指向已有真实业务库；只使用 `scripts/run-demo.sh`。
+`demo-artifact` profile 额外加载 V4、V4.1、V8、V11、V15，并且仅在 demo JAR 的 `demo` profile 中开启 Flyway out-of-order：同一数据库即使先迁移到 V14，仍可补入虚构演示数据和开题报告完整业务关联。演示迁移只能写入可随时丢弃的本机 `after_school_demo` 库。
 
 ## 生产部署（同源 Nginx）
 
@@ -254,7 +259,7 @@ test "$(curl -sS -o /dev/null -w '%{http_code}' https://after-school.example/.en
 
 ### 6. 备份、监控与回滚
 
-[`scripts/backup-mysql.sh`](scripts/backup-mysql.sh) 把 MySQL 8.4 在线导出直接压缩并用 age 公钥加密，明文 SQL 不落盘；[`scripts/restore-mysql-backup.sh`](scripts/restore-mysql-backup.sh) 只允许恢复到尚不存在的新库，并要求成功 Flyway 历史至少包含 V13、核心表、关键租户/监管外键和零条预警扫描运行孤儿记录。systemd timer 在每日 `00:15` 和 `12:15` 各运行一次，最多随机延迟 15 分钟；健康检查每 5 分钟验证 `MYSQL_DATABASE` 对应备份的 SHA-256 和新鲜度，18 小时未成功即告警，为 RPO 不超过 24 小时预留约 6 小时的修复窗口。
+[`scripts/backup-mysql.sh`](scripts/backup-mysql.sh) 把 MySQL 8.4 在线导出直接压缩并用 age 公钥加密，明文 SQL 不落盘；[`scripts/restore-mysql-backup.sh`](scripts/restore-mysql-backup.sh) 只允许恢复到尚不存在的新库，并要求成功 Flyway 历史至少包含 V14、17 张核心业务表、关键租户/监管/整改材料外键和零条预警扫描运行孤儿记录。systemd timer 在每日 `00:15` 和 `12:15` 各运行一次，最多随机延迟 15 分钟；健康检查每 5 分钟验证 `MYSQL_DATABASE` 对应备份的 SHA-256 和新鲜度，18 小时未成功即告警，为 RPO 不超过 24 小时预留约 6 小时的修复窗口。
 
 正式公网前必须完成一次真实恢复演练、配置异机备份上传和外部 FAILED/RECOVERED 告警。后端用 [`scripts/select-server-release.sh`](scripts/select-server-release.sh) 回滚，前端用 [`scripts/select-web-release.sh`](scripts/select-web-release.sh) 选择旧版本。JAR 回滚不等于数据库迁移回滚；Flyway 变更必须向后兼容。
 
@@ -281,4 +286,4 @@ scripts/verify.sh             隔离数据库的一键全链路验收
 
 ## 当前范围边界
 
-当前版本不包含学生独立登录、支付、微信小程序/原生 App、AI 推荐、消息通知和审批式候补队列；这些能力不影响本系统围绕选课、教务执行和教育监管的毕业设计主线。
+当前版本不包含学生独立登录、支付、微信小程序/原生 App、AI 推荐、短信/微信等外部消息渠道和审批式候补队列；监管站内通知已包含在平台内。

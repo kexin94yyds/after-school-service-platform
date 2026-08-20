@@ -20,6 +20,7 @@ import {
   type AcademicTerm,
   type PlanStatus,
   type ServicePlan,
+  type ServicePlanItem,
   type TermInput,
   type TermStatus,
 } from '@/api/academic'
@@ -64,6 +65,11 @@ const keyword = ref('')
 const mounted = ref(false)
 const planLoadVersion = ref(0)
 const transitioningId = ref<number | null>(null)
+const itemDialogVisible = ref(false)
+const itemPlan = ref<ServicePlan | null>(null)
+const planItems = ref<ServicePlanItem[]>([])
+const itemLoading = ref(false)
+const itemError = ref('')
 
 const filters = reactive<{
   schoolId: number | null
@@ -92,6 +98,21 @@ const sortedTerms = computed(() =>
     right.startDate.localeCompare(left.startDate),
   ),
 )
+
+async function showPlanItems(plan: ServicePlan): Promise<void> {
+  itemPlan.value = plan
+  itemDialogVisible.value = true
+  itemLoading.value = true
+  itemError.value = ''
+  try {
+    planItems.value = await academicApi.getServicePlanItems(plan.id)
+  } catch (loadError) {
+    planItems.value = []
+    itemError.value = getErrorMessage(loadError, '备案明细加载失败。')
+  } finally {
+    itemLoading.value = false
+  }
+}
 
 const selectedTerm = computed(() =>
   terms.value.find((term) => term.id === filters.termId),
@@ -682,10 +703,10 @@ onMounted(async () => {
         </el-table-column>
         <el-table-column label="操作" min-width="185" align="right">
           <template #default="{ row }">
-            <div
-              v-if="planActions(row as ServicePlan).length"
-              class="row-actions"
-            >
+            <div class="row-actions">
+              <el-button text @click="showPlanItems(row as ServicePlan)">
+                查看明细
+              </el-button>
               <el-button
                 v-for="action in planActions(row as ServicePlan)"
                 :key="action.target"
@@ -701,7 +722,6 @@ onMounted(async () => {
                 {{ action.label }}
               </el-button>
             </div>
-            <span v-else class="no-action">等待学校或流程已完成</span>
           </template>
         </el-table-column>
         <template #empty>
@@ -712,6 +732,28 @@ onMounted(async () => {
         </template>
       </el-table>
     </section>
+
+    <el-dialog
+      v-model="itemDialogVisible"
+      :title="`${itemPlan?.schoolName || ''} · ${itemPlan?.planName || '备案明细'}`"
+      width="min(860px, calc(100vw - 32px))"
+    >
+      <el-alert
+        v-if="itemError"
+        :title="itemError"
+        type="error"
+        :closable="false"
+        show-icon
+      />
+      <el-table v-loading="itemLoading" :data="planItems" table-layout="auto">
+        <el-table-column prop="category" label="课程类型" min-width="140" />
+        <el-table-column prop="plannedCourseCount" label="计划课程" min-width="90" />
+        <el-table-column prop="plannedClassCount" label="计划开班" min-width="90" />
+        <el-table-column prop="capacityPerClass" label="单班规模" min-width="90" />
+        <el-table-column prop="plannedTeacherCount" label="师资人数" min-width="90" />
+        <el-table-column prop="notes" label="配置说明" min-width="220" />
+      </el-table>
+    </el-dialog>
 
     <el-dialog
       v-model="termDialogVisible"

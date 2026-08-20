@@ -186,6 +186,7 @@ class AcademicServiceTest {
         when(currentUser.schoolScope(1L)).thenReturn(1L);
         when(mapper.lockTerm(1)).thenReturn(term("ACTIVE"));
         when(mapper.lockServicePlan(10, 1)).thenReturn(plan);
+        when(mapper.countPlanItems(10)).thenReturn(1);
         when(principal.roleCode()).thenReturn("SCHOOL_ADMIN");
         when(mapper.transitionServicePlan(
                         10,
@@ -209,6 +210,26 @@ class AcademicServiceTest {
                 null,
                 8,
                 NOW);
+    }
+
+    @Test
+    void schoolCannotSubmitPlanWithoutCourseScaleAndStaffingItems() {
+        ServicePlan plan = plan("DRAFT");
+        when(mapper.findServicePlan(10)).thenReturn(plan);
+        when(currentUser.schoolScope(1L)).thenReturn(1L);
+        when(mapper.lockTerm(1)).thenReturn(term("ACTIVE"));
+        when(mapper.lockServicePlan(10, 1)).thenReturn(plan);
+        when(principal.roleCode()).thenReturn("SCHOOL_ADMIN");
+
+        assertThatThrownBy(() -> service.transitionServicePlan(
+                        10,
+                        new AcademicController.PlanTransitionRequest("SUBMITTED", null)))
+                .isInstanceOf(ApiException.class)
+                .extracting(exception -> ((ApiException) exception).code())
+                .isEqualTo("PLAN_ITEMS_REQUIRED");
+
+        verify(mapper, never()).transitionServicePlan(
+                10, 1, "DRAFT", "SUBMITTED", null, 8, NOW);
     }
 
     @Test

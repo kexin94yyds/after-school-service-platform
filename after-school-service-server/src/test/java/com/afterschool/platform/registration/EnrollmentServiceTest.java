@@ -66,6 +66,10 @@ class EnrollmentServiceTest {
         when(mapper.lockSchoolEnrollment(30, 1)).thenReturn(lockedRecord);
         when(mapper.cancelEnrollment(30, null, 1L, 11)).thenReturn(1);
         when(mapper.decrementCapacity(20)).thenReturn(1);
+        when(mapper.findEnrollmentView(20, 10)).thenReturn(enrollmentView());
+        when(mapper.insertEnrollmentAction(
+                        1, 30, 20, 10, 8, "CANCEL", null, 11, "SCHOOL_ADMIN"))
+                .thenReturn(1);
 
         service.cancel(30);
 
@@ -142,7 +146,10 @@ class EnrollmentServiceTest {
         when(mapper.lockGuardianStudent(10, 8)).thenReturn(student());
         when(mapper.findFirstValidSessionStart(20)).thenReturn(null);
         when(mapper.incrementCapacity(20)).thenReturn(1);
-        when(mapper.findEnrollmentView(20, 10)).thenReturn(Map.of("id", 30L));
+        when(mapper.findEnrollmentView(20, 10)).thenReturn(enrollmentView());
+        when(mapper.insertEnrollmentAction(
+                        1, 30, 20, 10, 8, "ENROLL", null, 21, "GUARDIAN"))
+                .thenReturn(1);
 
         service.enroll(new EnrollmentController.EnrollmentRequest(10, 20));
 
@@ -192,6 +199,58 @@ class EnrollmentServiceTest {
         verify(mapper, never()).incrementCapacity(20);
     }
 
+    @Test
+    void switchesEnrollmentAtomicallyAndRecordsBothSides() {
+        PlatformPrincipal principal = guardianPrincipal();
+        when(currentUser.principal()).thenReturn(principal);
+        EnrollmentRecord oldRecord = new EnrollmentRecord();
+        oldRecord.setId(30);
+        oldRecord.setOfferingId(20);
+        oldRecord.setStudentId(10);
+        oldRecord.setStatus("ENROLLED");
+        when(mapper.findScopedEnrollment(30, 8)).thenReturn(oldRecord);
+        when(mapper.lockScopedEnrollment(30, 8)).thenReturn(oldRecord);
+
+        EnrollmentOffering oldOffering = offering();
+        oldOffering.setStartDate(LocalDate.of(2026, 9, 15));
+        EnrollmentOffering newOffering = offering();
+        newOffering.setId(21);
+        newOffering.setStartDate(LocalDate.of(2026, 9, 16));
+        when(mapper.lockOffering(20)).thenReturn(oldOffering);
+        when(mapper.lockOffering(21)).thenReturn(newOffering);
+        when(mapper.findOffering(20)).thenReturn(oldOffering);
+        when(mapper.findOffering(21)).thenReturn(newOffering);
+        when(mapper.lockGuardianStudent(10, 8)).thenReturn(student());
+        when(mapper.cancelEnrollment(30, 8L, null, 21)).thenReturn(1);
+        when(mapper.decrementCapacity(20)).thenReturn(1);
+        when(mapper.incrementCapacity(21)).thenReturn(1);
+        Map<String, Object> oldView = enrollmentView();
+        Map<String, Object> newView = Map.of(
+                "id", 31L,
+                "schoolId", 1L,
+                "offeringId", 21L,
+                "studentId", 10L,
+                "guardianId", 8L);
+        when(mapper.findEnrollmentView(20, 10)).thenReturn(oldView);
+        when(mapper.findEnrollmentView(21, 10)).thenReturn(newView);
+        when(mapper.insertEnrollmentAction(
+                        1, 30, 20, 10, 8, "SWITCH_OUT", 31L, 21, "GUARDIAN"))
+                .thenReturn(1);
+        when(mapper.insertEnrollmentAction(
+                        1, 31, 21, 10, 8, "SWITCH_IN", 30L, 21, "GUARDIAN"))
+                .thenReturn(1);
+
+        Map<String, Object> result = service.switchEnrollment(30, 21);
+
+        org.assertj.core.api.Assertions.assertThat(result).containsEntry("id", 31L);
+        verify(mapper).cancelEnrollment(30, 8L, null, 21);
+        verify(mapper).insertEnrollment(1, 21, 10, 8);
+        verify(mapper).insertEnrollmentAction(
+                1, 30, 20, 10, 8, "SWITCH_OUT", 31L, 21, "GUARDIAN");
+        verify(mapper).insertEnrollmentAction(
+                1, 31, 21, 10, 8, "SWITCH_IN", 30L, 21, "GUARDIAN");
+    }
+
     private PlatformPrincipal guardianPrincipal() {
         PlatformPrincipal principal = mock(PlatformPrincipal.class);
         when(principal.id()).thenReturn(21L);
@@ -226,7 +285,18 @@ class EnrollmentServiceTest {
         offering.setEnrolledCount(0);
         offering.setStatus("PUBLISHED");
         offering.setCourseStatus("ACTIVE");
+        offering.setTermStatus("ACTIVE");
+        offering.setPlanStatus("FILED");
         return offering;
+    }
+
+    private Map<String, Object> enrollmentView() {
+        return Map.of(
+                "id", 30L,
+                "schoolId", 1L,
+                "offeringId", 20L,
+                "studentId", 10L,
+                "guardianId", 8L);
     }
 
     private void assertCode(String code, Runnable action) {

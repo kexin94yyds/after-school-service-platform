@@ -68,6 +68,26 @@ export interface ServicePlanInput {
   description: string | null
 }
 
+export interface ServicePlanItem {
+  id: number
+  schoolId: number
+  planId: number
+  category: string
+  plannedCourseCount: number
+  plannedClassCount: number
+  capacityPerClass: number
+  plannedTeacherCount: number
+  notes: string | null
+  createdByName?: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type ServicePlanItemInput = Omit<
+  ServicePlanItem,
+  'id' | 'schoolId' | 'planId' | 'createdByName' | 'createdAt' | 'updatedAt'
+>
+
 export interface SchoolRoom {
   id: number
   schoolId: number
@@ -254,6 +274,36 @@ export const academicApi = {
       { targetStatus, reason: reason || null },
     )
     return response.data
+  },
+  async getServicePlanItems(planId: number): Promise<ServicePlanItem[]> {
+    const response = await http.get<ServicePlanItem[]>(
+      `/service-plans/${planId}/items`,
+    )
+    return response.data
+  },
+  async createServicePlanItem(
+    planId: number,
+    payload: ServicePlanItemInput,
+  ): Promise<ServicePlanItem> {
+    const response = await http.post<ServicePlanItem>(
+      `/service-plans/${planId}/items`,
+      payload,
+    )
+    return response.data
+  },
+  async updateServicePlanItem(
+    planId: number,
+    id: number,
+    payload: ServicePlanItemInput,
+  ): Promise<ServicePlanItem> {
+    const response = await http.put<ServicePlanItem>(
+      `/service-plans/${planId}/items/${id}`,
+      payload,
+    )
+    return response.data
+  },
+  async deleteServicePlanItem(planId: number, id: number): Promise<void> {
+    await http.delete(`/service-plans/${planId}/items/${id}`)
   },
 
   async getRooms(schoolId?: number): Promise<SchoolRoom[]> {

@@ -35,7 +35,8 @@ public class EvaluationController {
         Map<String, Object> created = service.submit(
                 request.studentId(),
                 request.offeringId(),
-                request.rating(),
+                request.courseRating() == null ? request.rating() : request.courseRating(),
+                request.teacherRating() == null ? request.rating() : request.teacherRating(),
                 request.comment());
         return ResponseEntity.created(
                         URI.create("/api/evaluations/" + created.get("id")))
@@ -87,6 +88,8 @@ public class EvaluationController {
     public record EvaluationRequest(
             @Positive long studentId,
             @Positive long offeringId,
-            @Min(1) @Max(5) int rating,
+            @Min(1) @Max(5) Integer courseRating,
+            @Min(1) @Max(5) Integer teacherRating,
+            @Min(1) @Max(5) Integer rating,
             @Size(max = 1000) String comment) {}
 }

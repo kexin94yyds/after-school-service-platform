@@ -89,6 +89,67 @@ public class AcademicService {
                 currentUser.optionalSchoolScope(requestedSchoolId), termId);
     }
 
+    public List<Map<String, Object>> servicePlanItems(long planId) {
+        ServicePlan plan = mapper.findServicePlan(planId);
+        if (plan == null) {
+            throw ApiException.notFound("服务计划不存在");
+        }
+        Long schoolId = currentUser.optionalSchoolScope(plan.getSchoolId());
+        return mapper.listServicePlanItems(planId, schoolId);
+    }
+
+    @Transactional
+    public Map<String, Object> createServicePlanItem(
+            long planId,
+            AcademicController.ServicePlanItemRequest request) {
+        ServicePlan plan = requireEditablePlan(planId);
+        mapper.insertServicePlanItem(
+                plan.getSchoolId(),
+                planId,
+                request.category().strip(),
+                request.plannedCourseCount(),
+                request.plannedClassCount(),
+                request.capacityPerClass(),
+                request.plannedTeacherCount(),
+                trimToNull(request.notes()),
+                currentUser.principal().id());
+        return mapper.listServicePlanItems(planId, plan.getSchoolId()).stream()
+                .filter(item -> request.category().strip().equals(item.get("category")))
+                .findFirst()
+                .orElseThrow(() -> ApiException.conflict(
+                        "PLAN_ITEM_NOT_CREATED", "计划明细未能保存"));
+    }
+
+    @Transactional
+    public Map<String, Object> updateServicePlanItem(
+            long planId,
+            long itemId,
+            AcademicController.ServicePlanItemRequest request) {
+        ServicePlan plan = requireEditablePlan(planId);
+        if (mapper.updateServicePlanItem(
+                        itemId,
+                        plan.getSchoolId(),
+                        planId,
+                        request.category().strip(),
+                        request.plannedCourseCount(),
+                        request.plannedClassCount(),
+                        request.capacityPerClass(),
+                        request.plannedTeacherCount(),
+                        trimToNull(request.notes()))
+                != 1) {
+            throw ApiException.notFound("计划明细不存在或不在当前学校");
+        }
+        return mapper.findServicePlanItem(itemId, planId, plan.getSchoolId());
+    }
+
+    @Transactional
+    public void deleteServicePlanItem(long planId, long itemId) {
+        ServicePlan plan = requireEditablePlan(planId);
+        if (mapper.deleteServicePlanItem(itemId, planId, plan.getSchoolId()) != 1) {
+            throw ApiException.notFound("计划明细不存在或不在当前学校");
+        }
+    }
+
     @Transactional
     public Map<String, Object> createServicePlan(
             AcademicController.ServicePlanRequest request) {
@@ -168,6 +229,12 @@ public class AcademicService {
                     "退回服务计划时必须填写原因");
         }
         if ("SUBMITTED".equals(request.targetStatus())
+                && mapper.countPlanItems(id) == 0) {
+            throw ApiException.conflict(
+                    "PLAN_ITEMS_REQUIRED",
+                    "提交备案前必须填写课程类型、开班规模和师资配置");
+        }
+        if ("SUBMITTED".equals(request.targetStatus())
                 && List.of("CLOSED", "ARCHIVED").contains(term.getStatus())) {
             throw ApiException.conflict(
                     "TERM_NOT_WRITABLE",
@@ -203,6 +270,24 @@ public class AcademicService {
                     "服务计划已被其他操作更新，请刷新后重试");
         }
         return mapper.findServicePlanByCode(schoolId, current.getPlanCode());
+    }
+
+    private ServicePlan requireEditablePlan(long planId) {
+        ServicePlan snapshot = mapper.findServicePlan(planId);
+        if (snapshot == null) {
+            throw ApiException.notFound("服务计划不存在");
+        }
+        long schoolId = currentUser.schoolScope(snapshot.getSchoolId());
+        ServicePlan plan = mapper.lockServicePlan(planId, schoolId);
+        if (plan == null) {
+            throw ApiException.notFound("服务计划不存在或不在当前学校");
+        }
+        if (!List.of("DRAFT", "RETURNED").contains(plan.getStatus())) {
+            throw ApiException.conflict(
+                    "PLAN_CONTENT_FROZEN",
+                    "只有草稿或退回的服务计划可以修改明细");
+        }
+        return plan;
     }
 
     public List<Map<String, Object>> rooms(Long requestedSchoolId) {

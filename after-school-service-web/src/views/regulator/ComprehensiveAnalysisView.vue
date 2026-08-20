@@ -10,6 +10,7 @@ import { extendedReportsApi } from '@/api/extended-reports'
 import type {
   CoursePerformanceFilters,
   CoursePerformanceRow,
+  RectificationReportRow,
 } from '@/api/extended-reports'
 import { getErrorMessage } from '@/api/http'
 import { referenceDataApi } from '@/api/reference-data'
@@ -31,6 +32,7 @@ const schools = ref<SchoolOption[]>([])
 const terms = ref<AcademicTermOption[]>([])
 const rows = ref<CoursePerformanceRow[]>([])
 const evaluations = ref<CourseEvaluation[]>([])
+const rectifications = ref<RectificationReportRow[]>([])
 const evaluationSummary = ref<EvaluationSummary | null>(null)
 const loading = ref(false)
 const referenceLoading = ref(false)
@@ -199,11 +201,16 @@ async function loadData(options: { saveQuery?: boolean } = {}): Promise<void> {
   error.value = ''
   try {
     if (options.saveQuery) await saveFiltersToUrl()
-    const [performanceResult, summaryResult, evaluationResult] =
+    const [performanceResult, summaryResult, evaluationResult, rectificationResult] =
       await Promise.allSettled([
       extendedReportsApi.getCoursePerformance(performanceQuery),
       evaluationApi.summary(evaluationQuery),
       evaluationApi.list(evaluationQuery),
+      extendedReportsApi.getRectifications({
+        schoolId: filters.schoolId,
+        detectedFrom: filters.dateRange?.[0],
+        detectedTo: filters.dateRange?.[1],
+      }),
     ])
     if (requestVersion !== dataLoadVersion) return
 
@@ -230,6 +237,14 @@ async function loadData(options: { saveQuery?: boolean } = {}): Promise<void> {
       evaluations.value = []
       messages.push(
         getErrorMessage(evaluationResult.reason, '评价明细加载失败。'),
+      )
+    }
+    if (rectificationResult.status === 'fulfilled') {
+      rectifications.value = rectificationResult.value
+    } else {
+      rectifications.value = []
+      messages.push(
+        getErrorMessage(rectificationResult.reason, '违规整改统计加载失败。'),
       )
     }
     error.value = messages.join(' ')
@@ -263,6 +278,34 @@ async function exportCsv(): Promise<void> {
   }
 }
 
+async function exportXlsx(): Promise<void> {
+  exporting.value = true
+  try {
+    await extendedReportsApi.downloadCoursePerformanceXlsx(reportFilters())
+    ElMessage.success('课程绩效 Excel 已开始下载')
+  } catch (downloadError) {
+    ElMessage.error(getErrorMessage(downloadError, 'Excel 导出失败。'))
+  } finally {
+    exporting.value = false
+  }
+}
+
+async function exportRectifications(): Promise<void> {
+  exporting.value = true
+  try {
+    await extendedReportsApi.downloadRectificationsXlsx({
+      schoolId: filters.schoolId,
+      detectedFrom: filters.dateRange?.[0],
+      detectedTo: filters.dateRange?.[1],
+    })
+    ElMessage.success('违规整改 Excel 已开始下载')
+  } catch (downloadError) {
+    ElMessage.error(getErrorMessage(downloadError, '违规整改 Excel 导出失败。'))
+  } finally {
+    exporting.value = false
+  }
+}
+
 function ratingText(value: number): string {
   return `${Number(value || 0).toFixed(1)} 分`
 }
@@ -282,7 +325,9 @@ onMounted(async () => {
     >
       <template #actions>
         <el-button :loading="loading" @click="loadData()">刷新分析</el-button>
-        <el-button type="primary" :loading="exporting" @click="exportCsv">导出 CSV</el-button>
+        <el-button :loading="exporting" @click="exportCsv">导出 CSV</el-button>
+        <el-button type="primary" :loading="exporting" @click="exportXlsx">导出课程 Excel</el-button>
+        <el-button type="success" :loading="exporting" @click="exportRectifications">导出整改 Excel</el-button>
       </template>
     </PageHeader>
 
@@ -480,9 +525,14 @@ onMounted(async () => {
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="评分" min-width="180">
+          <el-table-column label="课程评分" min-width="150">
             <template #default="{ row }">
-              <el-rate :model-value="row.rating" disabled show-score score-template="{value} 分" />
+              <el-rate :model-value="row.courseRating" disabled show-score score-template="{value} 分" />
+            </template>
+          </el-table-column>
+          <el-table-column label="教师评分" min-width="150">
+            <template #default="{ row }">
+              <el-rate :model-value="row.teacherRating" disabled show-score score-template="{value} 分" />
             </template>
           </el-table-column>
           <el-table-column label="提交时间" min-width="170">
@@ -491,7 +541,26 @@ onMounted(async () => {
         </el-table>
       </section>
 
-      <div v-if="!rows.length && !evaluations.length && !displayedError" class="empty-state">
+      <section v-if="rectifications.length" class="analysis-panel">
+        <div class="section-heading">
+          <div>
+            <span>违规整改</span>
+            <h2>预警与整改多维统计</h2>
+          </div>
+          <p>按学校、类型、等级和状态汇总事项数、逾期数与平均闭环时长</p>
+        </div>
+        <el-table :data="rectifications" table-layout="auto">
+          <el-table-column prop="schoolName" label="学校" min-width="170" />
+          <el-table-column prop="alertType" label="违规类型" min-width="150" />
+          <el-table-column prop="severity" label="等级" min-width="90" />
+          <el-table-column prop="status" label="状态" min-width="120" />
+          <el-table-column prop="alertCount" label="事项数" min-width="90" />
+          <el-table-column prop="overdueCount" label="逾期数" min-width="90" />
+          <el-table-column prop="averageCloseHours" label="平均闭环小时" min-width="130" />
+        </el-table>
+      </section>
+
+      <div v-if="!rows.length && !evaluations.length && !rectifications.length && !displayedError" class="empty-state">
         <strong>当前条件下暂无分析数据</strong>
         <span>可放宽学校、学期、类别、状态或日期范围后重新查询。</span>
       </div>

@@ -65,7 +65,8 @@ describe('V7 API contracts', () => {
     await evaluationApi.submit({
       studentId: 7,
       offeringId: 12,
-      rating: 5,
+      courseRating: 5,
+      teacherRating: 4,
       comment: '课程安排清晰',
     })
     await evaluationApi.getMine()
@@ -78,7 +79,8 @@ describe('V7 API contracts', () => {
     expect(post).toHaveBeenCalledWith('/evaluations', {
       studentId: 7,
       offeringId: 12,
-      rating: 5,
+      courseRating: 5,
+      teacherRating: 4,
       comment: '课程安排清晰',
     })
     expect(get).toHaveBeenCalledWith('/evaluations/mine')

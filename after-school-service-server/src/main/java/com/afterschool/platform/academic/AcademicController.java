@@ -14,6 +14,7 @@ import java.util.Map;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -81,6 +82,41 @@ public class AcademicController {
     Map<String, Object> transitionServicePlan(
             @PathVariable long id, @Valid @RequestBody PlanTransitionRequest request) {
         return service.transitionServicePlan(id, request);
+    }
+
+    @GetMapping("/service-plans/{planId}/items")
+    @PreAuthorize("hasAnyRole('REGULATOR','SCHOOL_ADMIN','TEACHER')")
+    List<Map<String, Object>> servicePlanItems(@PathVariable long planId) {
+        return service.servicePlanItems(planId);
+    }
+
+    @PostMapping("/service-plans/{planId}/items")
+    @PreAuthorize("hasRole('SCHOOL_ADMIN')")
+    ResponseEntity<Map<String, Object>> createServicePlanItem(
+            @PathVariable long planId,
+            @Valid @RequestBody ServicePlanItemRequest request) {
+        Map<String, Object> created = service.createServicePlanItem(planId, request);
+        return ResponseEntity.created(
+                        URI.create("/api/service-plans/" + planId + "/items/" + created.get("id")))
+                .body(created);
+    }
+
+    @PutMapping("/service-plans/{planId}/items/{itemId}")
+    @PreAuthorize("hasRole('SCHOOL_ADMIN')")
+    Map<String, Object> updateServicePlanItem(
+            @PathVariable long planId,
+            @PathVariable long itemId,
+            @Valid @RequestBody ServicePlanItemRequest request) {
+        return service.updateServicePlanItem(planId, itemId, request);
+    }
+
+    @DeleteMapping("/service-plans/{planId}/items/{itemId}")
+    @PreAuthorize("hasRole('SCHOOL_ADMIN')")
+    ResponseEntity<Void> deleteServicePlanItem(
+            @PathVariable long planId,
+            @PathVariable long itemId) {
+        service.deleteServicePlanItem(planId, itemId);
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/rooms")
@@ -171,6 +207,14 @@ public class AcademicController {
                     @Pattern(regexp = "SUBMITTED|FILED|RETURNED|ACTIVE|CLOSED|ARCHIVED")
                     String targetStatus,
             @Size(max = 500) String reason) {}
+
+    public record ServicePlanItemRequest(
+            @NotBlank @Size(max = 64) String category,
+            @Positive int plannedCourseCount,
+            @Positive int plannedClassCount,
+            @Positive int capacityPerClass,
+            @Positive int plannedTeacherCount,
+            @Size(max = 500) String notes) {}
 
     public record RoomRequest(
             Long schoolId,

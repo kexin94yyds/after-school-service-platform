@@ -99,7 +99,28 @@ const editingOffering = ref<CourseOffering | null>(null)
 const offeringSaving = ref(false)
 const offeringDialogError = ref('')
 const offeringFieldErrors = ref<Record<string, string>>({})
+const importInput = ref<HTMLInputElement>()
+const importingCourses = ref(false)
 const offeringForm = reactive<OfferingFormState>(emptyOfferingForm())
+
+async function handleCourseImport(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  importingCourses.value = true
+  try {
+    const result = await courseApi.importCourses(file)
+    ElMessage.success(
+      `课程导入完成：新增 ${result.createdCount} 条，更新 ${result.updatedCount} 条`,
+    )
+    await loadCourses()
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '课程导入失败。'))
+  } finally {
+    importingCourses.value = false
+  }
+}
 const {
   beforeClose: beforeOfferingDialogClose,
   captureBaseline: captureOfferingBaseline,
@@ -836,7 +857,26 @@ onMounted(() => {
       kicker="课程供给"
       title="课程与开班"
       description="先维护课程目录，再设置任课教师、上课周期、报名窗口和容量。"
-    />
+    >
+      <template #actions>
+        <el-button @click="courseApi.downloadImportTemplate()">下载导入模板</el-button>
+        <el-button @click="courseApi.downloadCourses()">导出课程 Excel</el-button>
+        <el-button
+          type="primary"
+          :loading="importingCourses"
+          @click="importInput?.click()"
+        >
+          批量导入课程
+        </el-button>
+        <input
+          ref="importInput"
+          hidden
+          type="file"
+          accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          @change="handleCourseImport"
+        />
+      </template>
+    </PageHeader>
     <el-tabs v-model="activeTab" class="business-tabs">
       <el-tab-pane label="课程目录" name="courses">
         <EntityCrudPanel
@@ -856,7 +896,7 @@ onMounted(() => {
           <header class="entity-panel-header">
             <div>
               <h2>开班</h2>
-              <p>标准资源按学期、备案计划、教室依次关联；旧开班仍可保留原文本。</p>
+              <p>发布前必须关联标准学期、已备案计划和启用教室，服务端会再次强制校验。</p>
             </div>
             <div class="offering-toolbar">
               <el-select

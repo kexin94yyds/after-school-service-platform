@@ -31,6 +31,10 @@ spring:
   sql:
     init:
       mode: never
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 11MB
 
 mybatis:
   configuration:
@@ -52,3 +56,5 @@ app:
       cron: ${SUPERVISION_SCAN_CRON:0 0 2 * * *}
       zone: ${SUPERVISION_SCAN_ZONE:Asia/Shanghai}
       stale-after: ${SUPERVISION_SCAN_STALE_AFTER:PT2H}
+  rectification:
+    storage-path: ${RECTIFICATION_MATERIAL_DIR:./data/rectification-materials}

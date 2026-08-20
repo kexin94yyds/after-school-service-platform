@@ -32,6 +32,7 @@
 /opt/after-school-service/tools/       root 拥有的运维脚本
 /var/www/after-school-service/releases/ 不可变前端版本
 /var/backups/after-school-service/     after-school-backup 私有目录
+/var/lib/after-school-service/rectification-materials/ systemd StateDirectory 下的整改附件
 ```
 
 JAR 和前端发布目录只允许 root 写入。后端服务用户只能读取当前 JAR；备份用户只能写备份目录和自己的 systemd 状态目录。生产 JAR 必须不含 demo 的迁移、profile 配置和刷新组件；`scripts/install-server-release.sh` 会拒绝含任一演示 payload 或以 `-demo.jar` 命名的构件。演示 JAR 只允许在隔离的本机 demo 环境中由 `scripts/run-demo.sh` 使用，禁止复制到生产 release 目录。
@@ -43,6 +44,8 @@ JAR 和前端发布目录只允许 root 写入。后端服务用户只能读取�
 数据库密码单独写入 `/etc/after-school-service/db-password`，权限必须为 `0600 root:root`，文件末尾可以有一个换行。不要在 EnvironmentFile、命令行、JAR、README 或 shell 历史中设置 `DB_PASSWORD`。
 
 生产数据库账号只授予应用所需库的最小 DML/DDL 权限。数据库 URL 必须使用 `sslMode=VERIFY_IDENTITY`，并确保主机名与数据库证书 SAN 匹配。同时必须包含唯一的 `connectionTimeZone=%2B08%3A00` 和 `forceConnectionTimeZoneToSession=true`，使连接会话时区在驱动建立连接时固定为 `+08:00`。
+
+`RECTIFICATION_MATERIAL_DIR` 应保持为 `/var/lib/after-school-service/rectification-materials`。systemd 的 `StateDirectory=after-school-service` 会创建父目录并授予服务账号写权限；不要把附件目录放到不可变 release、Web 根目录或共享临时目录。系统仅接受 PDF/JPG/PNG 且单文件不超过 10 MB，数据库保留对象键、大小、SHA-256、上传人和时间。
 
 监管扫描默认每日 02:00（`Asia/Shanghai`）执行。可在 EnvironmentFile 中用 `SUPERVISION_SCAN_ENABLED`、`SUPERVISION_SCAN_CRON`、`SUPERVISION_SCAN_ZONE` 和 `SUPERVISION_SCAN_STALE_AFTER` 调整；cron 含空格，必须保持引号。只关闭定时任务不会禁用监管员手工扫描。首次发布后应在监管端“扫描记录”确认运行来源、起止时间、成败和失败摘要。
 
@@ -141,7 +144,7 @@ sudo journalctl -u after-school-backup.service --since today
   /secure/age-identity.txt
 ```
 
-目标库必须不存在。脚本会校验 checksum、解密、导入，并确认 Flyway 历史没有失败记录且至少成功应用 V13，确认 11 张核心业务表、关键报名租户外键及 `supervision_alert → supervision_scan_run` 外键均存在，并确认没有预警扫描运行孤儿记录；失败只清理它刚创建的部分库。升级到未来迁移版本后，在恢复演练命令中设置 `RESTORE_REQUIRED_FLYWAY_VERSION` 为当前发布要求的版本，不得降低生产基线。
+目标库必须不存在。脚本会校验 checksum、解密、导入，并确认 Flyway 历史没有失败记录且至少成功应用 V14，确认 17 张核心业务表、报名/计划/通知/整改材料租户外键及 `supervision_alert → supervision_scan_run` 外键均存在，并确认没有预警扫描运行孤儿记录；失败只清理它刚创建的部分库。升级到未来迁移版本后，在恢复演练命令中设置 `RESTORE_REQUIRED_FLYWAY_VERSION` 为当前发布要求的版本，不得降低生产基线。
 
 恢复成功后，用恢复库启动一个不对公网开放的应用实例，执行登录、报名、考勤、请假、监管报表只读抽查，再记录实际 RTO。演练完成前不得把问题状态标为已验证。
 

@@ -103,12 +103,19 @@
 
     <select id="satisfactionSummary" resultType="map">
         SELECT COUNT(ce.id) AS evaluationCount,
-               COALESCE(ROUND(AVG(ce.rating), 2), 0) AS averageRating,
+               COALESCE(ROUND(AVG(ce.course_rating), 2), 0) AS averageRating,
+               COALESCE(ROUND(AVG(ce.course_rating), 2), 0) AS averageCourseRating,
+               COALESCE(ROUND(AVG(ce.teacher_rating), 2), 0) AS averageTeacherRating,
                COALESCE(ROUND(
-                   100.0 * SUM(CASE WHEN ce.rating >= 4 THEN 1 ELSE 0 END)
+                   100.0 * SUM(CASE WHEN ce.course_rating >= 4 THEN 1 ELSE 0 END)
                    / NULLIF(COUNT(ce.id), 0),
                    1
-               ), 0) AS satisfactionRate
+               ), 0) AS satisfactionRate,
+               COALESCE(ROUND(
+                   100.0 * SUM(CASE WHEN ce.teacher_rating >= 4 THEN 1 ELSE 0 END)
+                   / NULLIF(COUNT(ce.id), 0),
+                   1
+               ), 0) AS teacherSatisfactionRate
         FROM course_evaluation ce
         WHERE (#{schoolId} IS NULL OR ce.school_id = #{schoolId})
     </select>
@@ -134,7 +141,9 @@
                COALESCE(att.attendanceRate, 0) AS attendanceRate,
                COALESCE(ev.evaluationCount, 0) AS evaluationCount,
                COALESCE(ev.averageRating, 0) AS averageRating,
-               COALESCE(ev.satisfactionRate, 0) AS satisfactionRate
+               COALESCE(ev.satisfactionRate, 0) AS satisfactionRate,
+               COALESCE(ev.averageTeacherRating, 0) AS averageTeacherRating,
+               COALESCE(ev.teacherSatisfactionRate, 0) AS teacherSatisfactionRate
         FROM course_offering o
         JOIN school s ON s.id = o.school_id
         JOIN course c ON c.id = o.course_id
@@ -193,13 +202,20 @@
         LEFT JOIN (
             SELECT ce.offering_id,
                    COUNT(*) AS evaluationCount,
-                   ROUND(AVG(ce.rating), 2) AS averageRating,
+                   ROUND(AVG(ce.course_rating), 2) AS averageRating,
                    ROUND(
                        100.0 * SUM(
-                           CASE WHEN ce.rating >= 4 THEN 1 ELSE 0 END
+                           CASE WHEN ce.course_rating >= 4 THEN 1 ELSE 0 END
                        ) / NULLIF(COUNT(*), 0),
                        1
-                   ) AS satisfactionRate
+                   ) AS satisfactionRate,
+                   ROUND(AVG(ce.teacher_rating), 2) AS averageTeacherRating,
+                   ROUND(
+                       100.0 * SUM(
+                           CASE WHEN ce.teacher_rating >= 4 THEN 1 ELSE 0 END
+                       ) / NULLIF(COUNT(*), 0),
+                       1
+                   ) AS teacherSatisfactionRate
             FROM course_evaluation ce
             <where>
                 <if test="fromDate != null">
@@ -247,5 +263,46 @@
         </where>
         ORDER BY s.school_name, termName, c.category, c.course_name,
                  o.offering_code
+    </select>
+
+    <select id="rectificationBreakdown" resultType="map">
+        SELECT alert.school_id AS schoolId,
+               school.school_name AS schoolName,
+               alert.alert_type AS alertType,
+               alert.severity,
+               alert.status,
+               COUNT(*) AS alertCount,
+               SUM(CASE
+                       WHEN alert.status &lt;> 'CLOSED'
+                        AND alert.rectification_deadline &lt; CURRENT_TIMESTAMP(3)
+                       THEN 1 ELSE 0
+                   END) AS overdueCount,
+               COALESCE(ROUND(AVG(CASE
+                   WHEN alert.closed_at IS NOT NULL
+                   THEN TIMESTAMPDIFF(MINUTE, alert.detected_at, alert.closed_at) / 60.0
+                   ELSE NULL
+               END), 1), 0) AS averageCloseHours
+        FROM supervision_alert alert
+        JOIN school ON school.id = alert.school_id
+        <where>
+            <if test="schoolId != null">
+                alert.school_id = #{schoolId}
+            </if>
+            <if test="detectedFrom != null">
+                AND DATE(alert.detected_at) >= #{detectedFrom}
+            </if>
+            <if test="detectedTo != null">
+                AND DATE(alert.detected_at) &lt;= #{detectedTo}
+            </if>
+        </where>
+        GROUP BY alert.school_id,
+                 school.school_name,
+                 alert.alert_type,
+                 alert.severity,
+                 alert.status
+        ORDER BY school.school_name,
+                 alert.alert_type,
+                 FIELD(alert.severity, 'HIGH', 'MEDIUM', 'LOW'),
+                 alert.status
     </select>
 </mapper>

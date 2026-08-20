@@ -65,6 +65,25 @@ export interface SchoolAdminInput {
   enabled: boolean
 }
 
+export interface RegulatorAccount extends ApiEntity {
+  username: string
+  displayName: string
+  mobile: string | null
+  enabled: boolean
+  schoolIds: number[] | string
+  schoolNames: string | null
+  lastLoginAt?: string | null
+}
+
+export interface RegulatorInput {
+  username: string
+  displayName: string
+  mobile: string | null
+  password: string | null
+  enabled: boolean
+  schoolIds: number[]
+}
+
 export interface SchoolClass extends ApiEntity {
   schoolId: number
   schoolName?: string
@@ -267,6 +286,22 @@ export interface Enrollment extends ApiEntity {
   canceledByName: string | null
 }
 
+export interface EnrollmentAction extends ApiEntity {
+  schoolId: number
+  enrollmentId: number
+  offeringId: number
+  offeringCode: string
+  courseName: string
+  studentId: number
+  studentName: string
+  actionType: 'ENROLL' | 'CANCEL' | 'REACTIVATE' | 'SWITCH_OUT' | 'SWITCH_IN'
+  relatedEnrollmentId: number | null
+  actorUserId: number
+  actorName: string
+  actorRole: 'SCHOOL_ADMIN' | 'GUARDIAN'
+  actedAt: string
+}
+
 export interface GuardianStudent extends ApiEntity {
   schoolId: number
   schoolName: string
@@ -330,6 +365,20 @@ export interface GuardianAttendance extends ApiEntity {
   status: AttendanceStatus
   remark: string | null
   recordedAt: string
+}
+
+export interface GuardianMonthlyAttendance {
+  studentId: number
+  month: string
+  summary: {
+    totalCount: number
+    presentCount: number
+    lateCount: number
+    leaveCount: number
+    absentCount: number
+    attendanceRate: number
+  }
+  records: GuardianAttendance[]
 }
 
 export interface ReportSchoolSummary {

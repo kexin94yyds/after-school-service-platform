@@ -8,7 +8,9 @@ import { enrollmentApi } from '@/api/enrollments'
 import { getErrorMessage } from '@/api/http'
 import type {
   Enrollment,
+  EnrollmentAction,
   GuardianAttendance,
+  GuardianMonthlyAttendance,
   GuardianOffering,
   GuardianStudent,
 } from '@/api/types'
@@ -26,14 +28,23 @@ const selectedStudentId = ref<number | null>(null)
 const offerings = ref<GuardianOffering[]>([])
 const enrollments = ref<Enrollment[]>([])
 const attendance = ref<GuardianAttendance[]>([])
+const monthlyAttendance = ref<GuardianMonthlyAttendance | null>(null)
+const attendanceMonth = ref(new Date().toISOString().slice(0, 7))
 const loading = ref(false)
 const studentDataLoading = ref(false)
 const loadedStudentDataId = ref<number | null>(null)
 const error = ref('')
 const actingOfferingId = ref<number | null>(null)
 const cancelingEnrollmentId = ref<number | null>(null)
+const switchDialogVisible = ref(false)
+const switchingEnrollment = ref<Enrollment | null>(null)
+const switchTargetId = ref<number | null>(null)
+const switching = ref(false)
+const actionDialogVisible = ref(false)
+const enrollmentActions = ref<EnrollmentAction[]>([])
+const actionLoading = ref(false)
 type OfferingFilter = 'ALL' | 'AVAILABLE' | 'ENROLLED'
-type RecordTab = 'ENROLLMENTS' | 'ATTENDANCE'
+type RecordTab = 'ENROLLMENTS' | 'ATTENDANCE' | 'MONTHLY'
 const offeringFilter = ref<OfferingFilter>('ALL')
 const recordTab = ref<RecordTab>('ENROLLMENTS')
 let studentDataRequestId = 0
@@ -162,9 +173,10 @@ async function loadStudentData(studentId: number | null): Promise<void> {
   studentDataLoading.value = true
   error.value = ''
   try {
-    const [offeringItems, attendanceItems] = await Promise.all([
+    const [offeringItems, attendanceItems, monthly] = await Promise.all([
       enrollmentApi.getStudentOfferings(studentId),
       enrollmentApi.getStudentAttendance(studentId),
+      enrollmentApi.getStudentMonthlyAttendance(studentId, attendanceMonth.value),
     ])
     if (
       requestId !== studentDataRequestId ||
@@ -174,6 +186,7 @@ async function loadStudentData(studentId: number | null): Promise<void> {
     }
     offerings.value = offeringItems
     attendance.value = attendanceItems
+    monthlyAttendance.value = monthly
     loadedStudentDataId.value = studentId
   } catch (loadError) {
     if (
@@ -192,6 +205,18 @@ async function loadStudentData(studentId: number | null): Promise<void> {
     ) {
       studentDataLoading.value = false
     }
+  }
+}
+
+async function loadMonthlyAttendance(): Promise<void> {
+  if (!selectedStudentId.value) return
+  try {
+    monthlyAttendance.value = await enrollmentApi.getStudentMonthlyAttendance(
+      selectedStudentId.value,
+      attendanceMonth.value,
+    )
+  } catch (loadError) {
+    ElMessage.error(getErrorMessage(loadError, '月度考勤加载失败。'))
   }
 }
 
@@ -255,6 +280,43 @@ async function cancelEnrollment(enrollment: Enrollment): Promise<void> {
     ElMessage.error(getErrorMessage(actionError, '取消报名失败。'))
   } finally {
     cancelingEnrollmentId.value = null
+  }
+}
+
+function openSwitch(enrollment: Enrollment): void {
+  switchingEnrollment.value = enrollment
+  switchTargetId.value = null
+  switchDialogVisible.value = true
+}
+
+async function confirmSwitch(): Promise<void> {
+  if (!switchingEnrollment.value || !switchTargetId.value) return
+  switching.value = true
+  try {
+    await enrollmentApi.switchEnrollment(
+      switchingEnrollment.value.id,
+      switchTargetId.value,
+    )
+    ElMessage.success('改选成功，原报名和新报名已原子更新')
+    switchDialogVisible.value = false
+    await refresh()
+  } catch (actionError) {
+    ElMessage.error(getErrorMessage(actionError, '改选失败。'))
+  } finally {
+    switching.value = false
+  }
+}
+
+async function showEnrollmentActions(enrollment: Enrollment): Promise<void> {
+  actionDialogVisible.value = true
+  actionLoading.value = true
+  try {
+    enrollmentActions.value = await enrollmentApi.getActions(enrollment.id)
+  } catch (loadError) {
+    enrollmentActions.value = []
+    ElMessage.error(getErrorMessage(loadError, '报名变更历史加载失败。'))
+  } finally {
+    actionLoading.value = false
   }
 }
 
@@ -473,8 +535,36 @@ onMounted(refresh)
           >
             出勤记录 <span>{{ attendance.length }}</span>
           </button>
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="recordTab === 'MONTHLY'"
+            :class="{ active: recordTab === 'MONTHLY' }"
+            @click="recordTab = 'MONTHLY'"
+          >
+            月度考勤
+          </button>
         </div>
       </div>
+      <section v-if="recordTab === 'MONTHLY'" class="monthly-attendance">
+        <div class="list-toolbar">
+          <el-date-picker
+            v-model="attendanceMonth"
+            type="month"
+            value-format="YYYY-MM"
+            placeholder="选择月份"
+            @change="loadMonthlyAttendance"
+          />
+          <el-button @click="loadMonthlyAttendance">刷新月报</el-button>
+        </div>
+        <div class="report-metrics">
+          <article><span>应记课次</span><strong>{{ monthlyAttendance?.summary.totalCount || 0 }}</strong></article>
+          <article><span>正常/迟到</span><strong>{{ (monthlyAttendance?.summary.presentCount || 0) + (monthlyAttendance?.summary.lateCount || 0) }}</strong></article>
+          <article><span>请假</span><strong>{{ monthlyAttendance?.summary.leaveCount || 0 }}</strong></article>
+          <article><span>缺勤</span><strong>{{ monthlyAttendance?.summary.absentCount || 0 }}</strong></article>
+          <article><span>出勤率</span><strong>{{ monthlyAttendance?.summary.attendanceRate || 0 }}%</strong></article>
+        </div>
+      </section>
       <el-table
         v-if="recordTab === 'ATTENDANCE'"
         v-loading="studentDataLoading"
@@ -510,7 +600,7 @@ onMounted(refresh)
         </template>
       </el-table>
       <el-table
-        v-else
+        v-else-if="recordTab === 'ENROLLMENTS'"
         :data="studentEnrollments"
         row-key="id"
         table-layout="auto"
@@ -530,8 +620,17 @@ onMounted(refresh)
             {{ formatDateTime(row.enrolledAt) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120" align="right">
+        <el-table-column label="操作" min-width="240" align="right">
           <template #default="{ row }">
+            <el-button text @click="showEnrollmentActions(row)">变更历史</el-button>
+            <el-button
+              v-if="row.status === 'ENROLLED'"
+              text
+              type="primary"
+              @click="openSwitch(row)"
+            >
+              改选
+            </el-button>
             <el-button
               v-if="row.status === 'ENROLLED'"
               text
@@ -550,7 +649,51 @@ onMounted(refresh)
           </div>
         </template>
       </el-table>
+      <el-table
+        v-else
+        :data="monthlyAttendance?.records || []"
+        table-layout="auto"
+      >
+        <el-table-column prop="courseName" label="课程" min-width="150" />
+        <el-table-column prop="sessionDate" label="日期" min-width="120">
+          <template #default="{ row }">{{ formatDate(row.sessionDate) }}</template>
+        </el-table-column>
+        <el-table-column prop="status" label="出勤" min-width="100">
+          <template #default="{ row }">{{ statusLabel(row.status) }}</template>
+        </el-table-column>
+        <el-table-column prop="remark" label="备注" min-width="180" />
+      </el-table>
     </section>
+
+    <el-dialog v-model="switchDialogVisible" title="改选课程" width="min(520px, calc(100vw - 32px))">
+      <p>原课程：{{ switchingEnrollment?.courseName }}</p>
+      <el-select v-model="switchTargetId" filterable placeholder="选择新课程" style="width: 100%">
+        <el-option
+          v-for="offering in offerings.filter((item) => item.id !== switchingEnrollment?.offeringId)"
+          :key="offering.id"
+          :label="`${offering.courseName}（剩余 ${remainingCapacity(offering)}）`"
+          :value="offering.id"
+          :disabled="remainingCapacity(offering) <= 0"
+        />
+      </el-select>
+      <template #footer>
+        <el-button @click="switchDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="switching" :disabled="!switchTargetId" @click="confirmSwitch">
+          确认改选
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="actionDialogVisible" title="报名变更历史" width="min(720px, calc(100vw - 32px))">
+      <el-table v-loading="actionLoading" :data="enrollmentActions" table-layout="auto">
+        <el-table-column prop="actionType" label="动作" min-width="110" />
+        <el-table-column prop="courseName" label="课程" min-width="150" />
+        <el-table-column prop="actorName" label="操作人" min-width="110" />
+        <el-table-column prop="actedAt" label="时间" min-width="170">
+          <template #default="{ row }">{{ formatDateTime(row.actedAt) }}</template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
 
     <div v-if="!loading && students.length === 0" class="empty-state page-empty">
       <strong>暂无已绑定学生</strong>

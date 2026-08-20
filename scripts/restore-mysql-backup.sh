@@ -29,7 +29,7 @@ checksum_file="${backup_file}.sha256"
 mysql_bin="${AFTER_SCHOOL_MYSQL_BIN:-mysql}"
 age_bin="${AFTER_SCHOOL_AGE_BIN:-age}"
 gzip_bin="${AFTER_SCHOOL_GZIP_BIN:-gzip}"
-required_flyway_version="${RESTORE_REQUIRED_FLYWAY_VERSION:-13}"
+required_flyway_version="${RESTORE_REQUIRED_FLYWAY_VERSION:-14}"
 
 [[ "${target_database}" =~ ^[A-Za-z0-9_]{1,64}$ ]] \
   || fail "new database name must contain only letters, digits and underscore"
@@ -154,18 +154,30 @@ core_table_count="$("${mysql_bin}" --defaults-extra-file="${credentials_file}" \
       AND table_name IN (
         'school', 'sys_user', 'course', 'course_offering', 'student',
         'enrollment', 'lesson_session', 'attendance', 'supervision_alert',
-        'supervision_scan_run', 'operation_audit'
+        'supervision_scan_run', 'operation_audit', 'course_evaluation',
+        'service_plan_item', 'enrollment_action', 'regulator_school_scope',
+        'regulator_notification', 'rectification_notice',
+        'rectification_material'
       )")"
 required_fk_count="$("${mysql_bin}" --defaults-extra-file="${credentials_file}" \
   --batch --skip-column-names \
   --execute="SELECT COUNT(*)
     FROM information_schema.referential_constraints
     WHERE constraint_schema = '${target_database}'
-      AND table_name IN ('enrollment', 'supervision_alert')
+      AND table_name IN (
+        'enrollment', 'supervision_alert', 'service_plan_item',
+        'enrollment_action', 'regulator_notification',
+        'rectification_notice', 'rectification_material'
+      )
       AND constraint_name IN (
         'fk_enrollment_offering_school',
         'fk_enrollment_student_school',
-        'fk_supervision_alert_scan_run'
+        'fk_supervision_alert_scan_run',
+        'fk_plan_item_plan_school',
+        'fk_enrollment_action_identity',
+        'fk_regulator_notification_alert_school',
+        'fk_rectification_notice_alert_school',
+        'fk_rectification_material_notice_school'
       )")"
 scan_run_orphan_count="$("${mysql_bin}" --defaults-extra-file="${credentials_file}" \
   --batch --skip-column-names \
@@ -185,9 +197,9 @@ IFS=':' read -r flyway_history_count failed_migration_count required_version_cou
     && "${failed_migration_count}" == "0" \
     && "${required_version_count}" -ge 1 ]] \
   || fail "restored database Flyway history is incomplete, failed or predates required version ${required_flyway_version}"
-[[ "${core_table_count}" == "11" ]] \
+[[ "${core_table_count}" == "17" ]] \
   || fail "restored database is missing one or more required core tables"
-[[ "${required_fk_count}" == "3" ]] \
+[[ "${required_fk_count}" == "8" ]] \
   || fail "restored database is missing required tenant or supervision foreign keys"
 [[ "${scan_run_orphan_count}" == "0" ]] \
   || fail "restored database contains supervision alerts without a scan run"

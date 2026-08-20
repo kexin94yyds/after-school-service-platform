@@ -59,6 +59,18 @@ class ProductionObservabilityConfigurationTest {
                 .isEqualTo("30s");
     }
 
+    @Test
+    void disablesOpenApiAndKeepsRectificationFilesInSystemdStateDirectory() {
+        ConfigurableEnvironment environment = productionEnvironment();
+
+        assertThat(environment.getProperty("springdoc.api-docs.enabled", Boolean.class))
+                .isFalse();
+        assertThat(environment.getProperty("springdoc.swagger-ui.enabled", Boolean.class))
+                .isFalse();
+        assertThat(environment.getProperty("app.rectification.storage-path"))
+                .isEqualTo("/var/lib/after-school-service/rectification-materials");
+    }
+
     private Set<String> csvProperty(
             ConfigurableEnvironment environment, String propertyName) {
         String value = environment.getRequiredProperty(propertyName);

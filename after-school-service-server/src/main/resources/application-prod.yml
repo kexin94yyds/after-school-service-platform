@@ -26,6 +26,10 @@ springdoc:
   swagger-ui:
     enabled: false
 
+app:
+  rectification:
+    storage-path: ${RECTIFICATION_MATERIAL_DIR:/var/lib/after-school-service/rectification-materials}
+
 management:
   server:
     address: 127.0.0.1

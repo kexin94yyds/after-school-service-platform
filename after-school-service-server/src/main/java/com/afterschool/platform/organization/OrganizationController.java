@@ -4,6 +4,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -35,6 +36,29 @@ public class OrganizationController {
     @PreAuthorize("hasAnyRole('REGULATOR','SCHOOL_ADMIN')")
     List<Map<String, Object>> schools() {
         return service.schools();
+    }
+
+    @GetMapping("/regulators")
+    @PreAuthorize("hasRole('REGULATOR')")
+    List<Map<String, Object>> regulators() {
+        return service.regulators();
+    }
+
+    @PostMapping("/regulators")
+    @PreAuthorize("hasRole('REGULATOR')")
+    ResponseEntity<Map<String, Object>> createRegulator(
+            @Valid @RequestBody RegulatorRequest request) {
+        Map<String, Object> created = service.createRegulator(request);
+        return ResponseEntity.created(URI.create("/api/regulators/" + created.get("id")))
+                .body(created);
+    }
+
+    @PutMapping("/regulators/{id}")
+    @PreAuthorize("hasRole('REGULATOR')")
+    Map<String, Object> updateRegulator(
+            @PathVariable long id,
+            @Valid @RequestBody RegulatorRequest request) {
+        return service.updateRegulator(id, request);
     }
 
     @PostMapping("/schools")
@@ -109,6 +133,14 @@ public class OrganizationController {
             @Size(max = 32) String mobile,
             @Size(min = 12, max = 72) String password,
             @NotNull Boolean enabled) {}
+
+    public record RegulatorRequest(
+            @NotBlank @Size(max = 64) String username,
+            @NotBlank @Size(max = 64) String displayName,
+            @Size(max = 32) String mobile,
+            @Size(min = 12, max = 72) String password,
+            @NotNull Boolean enabled,
+            @NotEmpty List<@Min(1) Long> schoolIds) {}
 
     public record ClassRequest(
             Long schoolId,

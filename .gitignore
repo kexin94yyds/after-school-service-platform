@@ -8,6 +8,7 @@
 !.env.example
 
 after-school-service-server/target/
+after-school-service-server/data/
 after-school-service-web/node_modules/
 after-school-service-web/dist/
 after-school-service-web/test-results/

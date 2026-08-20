@@ -41,7 +41,8 @@ const submitting = ref(false)
 const dialogError = ref('')
 const selectedCandidate = ref<EvaluationCandidate | null>(null)
 const form = reactive({
-  rating: 0,
+  courseRating: 0,
+  teacherRating: 0,
   comment: '',
 })
 const {
@@ -194,7 +195,8 @@ async function refresh(): Promise<void> {
 function openEvaluation(candidate: EvaluationCandidate): void {
   if (isSubmitted(candidate)) return
   selectedCandidate.value = candidate
-  form.rating = 0
+  form.courseRating = 0
+  form.teacherRating = 0
   form.comment = ''
   dialogError.value = ''
   captureEvaluationBaseline()
@@ -204,8 +206,11 @@ function openEvaluation(candidate: EvaluationCandidate): void {
 async function submitEvaluation(): Promise<void> {
   const candidate = selectedCandidate.value
   if (!candidate) return
-  if (form.rating < 1 || form.rating > 5) {
-    dialogError.value = '请选择 1 到 5 星评分。'
+  if (
+    form.courseRating < 1 || form.courseRating > 5 ||
+    form.teacherRating < 1 || form.teacherRating > 5
+  ) {
+    dialogError.value = '请分别选择 1 到 5 星的课程评分和教师评分。'
     return
   }
   const comment = form.comment.trim()
@@ -219,7 +224,8 @@ async function submitEvaluation(): Promise<void> {
     await evaluationApi.submit({
       studentId: candidate.enrollment.studentId,
       offeringId: candidate.enrollment.offeringId,
-      rating: form.rating,
+      courseRating: form.courseRating,
+      teacherRating: form.teacherRating,
       comment: comment || null,
     })
     rememberSubmitted(candidate)
@@ -377,11 +383,20 @@ onMounted(refresh)
       <el-form label-position="top" @submit.prevent>
         <el-form-item label="课程评分" required>
           <el-rate
-            v-model="form.rating"
+            v-model="form.courseRating"
             size="large"
             show-text
             :texts="['很不满意', '不满意', '一般', '满意', '很满意']"
             aria-label="课程评分"
+          />
+        </el-form-item>
+        <el-form-item label="教师评分" required>
+          <el-rate
+            v-model="form.teacherRating"
+            size="large"
+            show-text
+            :texts="['很不满意', '不满意', '一般', '满意', '很满意']"
+            aria-label="教师评分"
           />
         </el-form-item>
         <el-form-item label="评价内容">

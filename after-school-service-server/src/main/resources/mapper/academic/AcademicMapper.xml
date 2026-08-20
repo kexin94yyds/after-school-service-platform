@@ -263,6 +263,98 @@
         WHERE plan_id = #{planId}
     </select>
 
+    <select id="countPlanItems" resultType="int">
+        SELECT COUNT(*)
+        FROM service_plan_item
+        WHERE plan_id = #{planId}
+    </select>
+
+    <select id="listServicePlanItems" resultType="map">
+        SELECT item.id,
+               item.school_id AS schoolId,
+               item.plan_id AS planId,
+               item.category,
+               item.planned_course_count AS plannedCourseCount,
+               item.planned_class_count AS plannedClassCount,
+               item.capacity_per_class AS capacityPerClass,
+               item.planned_teacher_count AS plannedTeacherCount,
+               item.notes,
+               creator.display_name AS createdByName,
+               item.created_at AS createdAt,
+               item.updated_at AS updatedAt
+        FROM service_plan_item item
+        JOIN sys_user creator ON creator.id = item.created_by
+        WHERE item.plan_id = #{planId}
+          <if test="schoolId != null">
+              AND item.school_id = #{schoolId}
+          </if>
+        ORDER BY item.category, item.id
+    </select>
+
+    <select id="findServicePlanItem" resultType="map">
+        SELECT item.id,
+               item.school_id AS schoolId,
+               item.plan_id AS planId,
+               item.category,
+               item.planned_course_count AS plannedCourseCount,
+               item.planned_class_count AS plannedClassCount,
+               item.capacity_per_class AS capacityPerClass,
+               item.planned_teacher_count AS plannedTeacherCount,
+               item.notes,
+               creator.display_name AS createdByName,
+               item.created_at AS createdAt,
+               item.updated_at AS updatedAt
+        FROM service_plan_item item
+        JOIN sys_user creator ON creator.id = item.created_by
+        WHERE item.id = #{id}
+          AND item.plan_id = #{planId}
+          AND item.school_id = #{schoolId}
+    </select>
+
+    <insert id="insertServicePlanItem">
+        INSERT INTO service_plan_item (
+            school_id,
+            plan_id,
+            category,
+            planned_course_count,
+            planned_class_count,
+            capacity_per_class,
+            planned_teacher_count,
+            notes,
+            created_by
+        ) VALUES (
+            #{schoolId},
+            #{planId},
+            #{category},
+            #{plannedCourseCount},
+            #{plannedClassCount},
+            #{capacityPerClass},
+            #{plannedTeacherCount},
+            #{notes},
+            #{createdBy}
+        )
+    </insert>
+
+    <update id="updateServicePlanItem">
+        UPDATE service_plan_item
+        SET category = #{category},
+            planned_course_count = #{plannedCourseCount},
+            planned_class_count = #{plannedClassCount},
+            capacity_per_class = #{capacityPerClass},
+            planned_teacher_count = #{plannedTeacherCount},
+            notes = #{notes}
+        WHERE id = #{id}
+          AND plan_id = #{planId}
+          AND school_id = #{schoolId}
+    </update>
+
+    <delete id="deleteServicePlanItem">
+        DELETE FROM service_plan_item
+        WHERE id = #{id}
+          AND plan_id = #{planId}
+          AND school_id = #{schoolId}
+    </delete>
+
     <sql id="roomColumns">
         r.id,
         r.school_id AS schoolId,

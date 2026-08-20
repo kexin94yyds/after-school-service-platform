@@ -12,6 +12,9 @@ import type {
   AlertStatus,
   AlertType,
   ScanResult,
+  RegulatorNotification,
+  RectificationMaterial,
+  RectificationNotice,
   SupervisionScanRun,
   SupervisionAction,
   SupervisionAlert,
@@ -82,13 +85,30 @@ const historyAlert = ref<SupervisionAlert | null>(null)
 const history = ref<SupervisionAction[]>([])
 let historyLoadVersion = 0
 
+const rectificationVisible = ref(false)
+const rectificationAlert = ref<SupervisionAlert | null>(null)
+const rectificationNotice = ref<RectificationNotice | null>(null)
+const rectificationMaterials = ref<RectificationMaterial[]>([])
+const rectificationLoading = ref(false)
+const rectificationError = ref('')
+const materialInput = ref<HTMLInputElement>()
+const uploadingMaterial = ref(false)
+const noticeForm = reactive({ title: '', requirements: '', dueAt: '' })
+
+const notificationVisible = ref(false)
+const notifications = ref<RegulatorNotification[]>([])
+const notificationLoading = ref(false)
+const unreadNotificationCount = computed(
+  () => notifications.value.filter((item) => !Boolean(item.isRead)).length,
+)
+
 const pageCopy = computed(() =>
   props.mode === 'regulator'
     ? {
         kicker: '监管闭环',
         title: '课后服务预警与复核',
         description:
-          '扫描考勤逾期、开课未排课和低出勤率风险，跟踪学校整改并完成监管复核。',
+          '自动识别超额开班、师资不足、考勤缺失和未备案开课，向负责监管账号派送并完成整改复核。',
       }
     : {
         kicker: '学校整改',
@@ -114,7 +134,99 @@ const alertTypes: Array<{ value: AlertType; label: string }> = [
   { value: 'OVERDUE_ATTENDANCE', label: '考勤逾期' },
   { value: 'OFFERING_NO_SESSIONS', label: '开课未排课' },
   { value: 'LOW_ATTENDANCE', label: '低出勤率' },
+  { value: 'OVER_CAPACITY', label: '超额开班' },
+  { value: 'STAFF_SHORTAGE', label: '师资不足' },
+  { value: 'MISSING_ATTENDANCE', label: '考勤缺失' },
+  { value: 'UNFILED_OFFERING', label: '未备案开课' },
 ]
+
+async function loadNotifications(): Promise<void> {
+  if (props.mode !== 'regulator') return
+  notificationLoading.value = true
+  try {
+    notifications.value = await supervisionApi.notifications()
+  } catch (loadError) {
+    ElMessage.error(getErrorMessage(loadError, '监管通知加载失败。'))
+  } finally {
+    notificationLoading.value = false
+  }
+}
+
+async function openNotifications(): Promise<void> {
+  notificationVisible.value = true
+  await loadNotifications()
+}
+
+async function markNotificationRead(item: RegulatorNotification): Promise<void> {
+  if (Boolean(item.isRead)) return
+  await supervisionApi.markNotificationRead(item.id)
+  await loadNotifications()
+}
+
+async function openRectification(alert: SupervisionAlert): Promise<void> {
+  rectificationAlert.value = alert
+  rectificationVisible.value = true
+  rectificationLoading.value = true
+  rectificationError.value = ''
+  const [noticeResult, materialResult] = await Promise.allSettled([
+    supervisionApi.notice(alert.id),
+    supervisionApi.materials(alert.id),
+  ])
+  rectificationNotice.value = noticeResult.status === 'fulfilled' ? noticeResult.value : null
+  rectificationMaterials.value = materialResult.status === 'fulfilled' ? materialResult.value : []
+  if (rectificationNotice.value) {
+    noticeForm.title = rectificationNotice.value.title
+    noticeForm.requirements = rectificationNotice.value.requirements
+    noticeForm.dueAt = rectificationNotice.value.dueAt.slice(0, 16)
+  } else {
+    noticeForm.title = `${alert.title}整改通知`
+    noticeForm.requirements = ''
+    const due = new Date(Date.now() + 7 * 86400000)
+    noticeForm.dueAt = due.toISOString().slice(0, 16)
+  }
+  rectificationLoading.value = false
+}
+
+async function issueNotice(): Promise<void> {
+  const alert = rectificationAlert.value
+  if (!alert || !noticeForm.title.trim() || !noticeForm.requirements.trim() || !noticeForm.dueAt) {
+    rectificationError.value = '请完整填写通知标题、整改要求和截止时间。'
+    return
+  }
+  rectificationLoading.value = true
+  try {
+    rectificationNotice.value = await supervisionApi.issueNotice(alert.id, {
+      title: noticeForm.title.trim(),
+      requirements: noticeForm.requirements.trim(),
+      dueAt: `${noticeForm.dueAt}:00`,
+    })
+    ElMessage.success('整改通知已下发')
+    await loadAlerts()
+    await loadNotifications()
+  } catch (actionError) {
+    rectificationError.value = getErrorMessage(actionError, '整改通知下发失败。')
+  } finally {
+    rectificationLoading.value = false
+  }
+}
+
+async function uploadMaterial(event: Event): Promise<void> {
+  const alert = rectificationAlert.value
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!alert || !file) return
+  uploadingMaterial.value = true
+  try {
+    await supervisionApi.uploadMaterial(alert.id, file)
+    rectificationMaterials.value = await supervisionApi.materials(alert.id)
+    ElMessage.success('整改材料已上传并留痕')
+  } catch (actionError) {
+    rectificationError.value = getErrorMessage(actionError, '整改材料上传失败。')
+  } finally {
+    uploadingMaterial.value = false
+  }
+}
 
 const alertStatuses: AlertStatus[] = [
   'OPEN',
@@ -379,6 +491,7 @@ async function runScan(): Promise<void> {
         : '扫描完成，未发现新预警',
     )
     await loadAlerts()
+    await loadNotifications()
     if (scanRunsVisible.value) await loadScanRuns()
   } catch (scanError) {
     ElMessage.error(getErrorMessage(scanError, '监管扫描执行失败。'))
@@ -437,6 +550,8 @@ function actionLabel(value: string): string {
     START_RECTIFICATION: '开始整改',
     RESUME_RECTIFICATION: '继续整改',
     SUBMIT_VERIFICATION: '提交复核',
+    ISSUE_NOTICE: '下发整改通知',
+    SUBMIT_MATERIAL: '提交整改材料',
     VERIFY_CLOSE: '复核关闭',
     RETURN_FOR_RECTIFICATION: '退回整改',
   }
@@ -445,7 +560,7 @@ function actionLabel(value: string): string {
 
 onMounted(async () => {
   hydrateFilters()
-  await Promise.all([loadReferences(), loadAlerts()])
+  await Promise.all([loadReferences(), loadAlerts(), loadNotifications()])
 })
 </script>
 
@@ -460,6 +575,9 @@ onMounted(async () => {
         <el-button :loading="loading" @click="loadAlerts()">刷新</el-button>
         <el-button v-if="mode === 'regulator'" @click="openScanRuns">
           扫描记录
+        </el-button>
+        <el-button v-if="mode === 'regulator'" @click="openNotifications">
+          监管通知（{{ unreadNotificationCount }}）
         </el-button>
         <el-button v-if="mode === 'regulator'" type="primary" @click="openScan">
           执行扫描
@@ -597,6 +715,9 @@ onMounted(async () => {
           <template #default="{ row }">
             <div class="row-actions">
               <el-button text @click="openHistory(row)">详情</el-button>
+              <el-button text type="primary" @click="openRectification(row)">
+                {{ mode === 'regulator' ? '整改通知' : '整改材料' }}
+              </el-button>
               <el-button
                 v-for="action in workflowActions(row)"
                 :key="action.targetStatus"
@@ -618,6 +739,98 @@ onMounted(async () => {
         </template>
       </el-table>
     </section>
+
+    <el-drawer v-model="notificationVisible" title="监管通知" size="min(680px, 96vw)">
+      <div class="scan-run-toolbar">
+        <p>只显示当前监管账号负责学校产生的预警和复核待办。</p>
+        <el-button :loading="notificationLoading" @click="loadNotifications">刷新</el-button>
+      </div>
+      <el-table v-loading="notificationLoading" :data="notifications" table-layout="auto">
+        <el-table-column prop="schoolName" label="学校" min-width="150" />
+        <el-table-column label="通知" min-width="240">
+          <template #default="{ row }">
+            <strong>{{ row.title }}</strong><br />
+            <small>{{ row.content }}</small>
+          </template>
+        </el-table-column>
+        <el-table-column label="时间" min-width="160">
+          <template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="90">
+          <template #default="{ row }">
+            <el-button v-if="!Boolean(row.isRead)" text @click="markNotificationRead(row)">已读</el-button>
+            <span v-else>已读</span>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-drawer>
+
+    <el-dialog
+      v-model="rectificationVisible"
+      :title="mode === 'regulator' ? '整改通知与材料' : '整改材料提交'"
+      width="min(760px, 94vw)"
+    >
+      <el-alert
+        v-if="rectificationError"
+        :title="rectificationError"
+        type="error"
+        :closable="false"
+        show-icon
+      />
+      <el-form v-if="mode === 'regulator'" label-position="top">
+        <el-form-item label="通知标题" required>
+          <el-input v-model="noticeForm.title" maxlength="128" />
+        </el-form-item>
+        <el-form-item label="整改要求" required>
+          <el-input v-model="noticeForm.requirements" type="textarea" :rows="4" maxlength="2000" show-word-limit />
+        </el-form-item>
+        <el-form-item label="整改截止时间" required>
+          <el-date-picker v-model="noticeForm.dueAt" type="datetime" value-format="YYYY-MM-DDTHH:mm" />
+        </el-form-item>
+        <el-button type="primary" :loading="rectificationLoading" @click="issueNotice">
+          下发/更新整改通知
+        </el-button>
+      </el-form>
+      <el-alert
+        v-else-if="rectificationNotice"
+        :title="rectificationNotice.title"
+        :description="`${rectificationNotice.requirements}；截止 ${formatDateTime(rectificationNotice.dueAt)}`"
+        type="info"
+        show-icon
+        :closable="false"
+      />
+      <div class="scan-run-toolbar" style="margin-top: 20px">
+        <p>PDF/JPG/PNG，单文件不超过 10 MB；每次上传均保留版本、哈希、上传人和时间。</p>
+        <el-button
+          v-if="mode === 'school'"
+          type="primary"
+          :loading="uploadingMaterial"
+          :disabled="!rectificationNotice"
+          @click="materialInput?.click()"
+        >
+          上传整改材料
+        </el-button>
+        <input
+          ref="materialInput"
+          hidden
+          type="file"
+          accept="application/pdf,image/jpeg,image/png,.pdf,.jpg,.jpeg,.png"
+          @change="uploadMaterial"
+        />
+      </div>
+      <el-table :data="rectificationMaterials" table-layout="auto">
+        <el-table-column prop="originalName" label="文件" min-width="200" />
+        <el-table-column prop="uploadedByName" label="上传人" min-width="110" />
+        <el-table-column label="上传时间" min-width="170">
+          <template #default="{ row }">{{ formatDateTime(row.uploadedAt) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="90">
+          <template #default="{ row }">
+            <el-button text @click="supervisionApi.downloadMaterial(row)">下载</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
 
     <el-dialog v-model="scanVisible" title="执行监管扫描" width="min(620px, 92vw)">
       <el-alert

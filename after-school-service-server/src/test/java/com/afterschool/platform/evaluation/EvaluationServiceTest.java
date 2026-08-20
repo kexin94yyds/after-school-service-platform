@@ -46,7 +46,7 @@ class EvaluationServiceTest {
                 .thenReturn(eligibility);
         when(mapper.countEvaluation(20, 10)).thenReturn(0);
         when(mapper.insertEvaluation(
-                        2, 20, 77, 10, 31, 5, "孩子很喜欢"))
+                        2, 20, 77, 10, 31, 5, 5, "孩子很喜欢"))
                 .thenReturn(1);
         when(mapper.findEvaluation(20, 10))
                 .thenReturn(Map.of("id", 90L, "rating", 5));
@@ -62,7 +62,7 @@ class EvaluationServiceTest {
         locks.verify(mapper).lockStudent(10, 2);
         locks.verify(mapper).lockEligibility(10, 20, 31, 2);
         verify(mapper).insertEvaluation(
-                2, 20, 77, 10, 31, 5, "孩子很喜欢");
+                2, 20, 77, 10, 31, 5, 5, "孩子很喜欢");
     }
 
     @Test

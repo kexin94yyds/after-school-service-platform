@@ -52,6 +52,115 @@
         WHERE id = #{schoolId}
     </select>
 
+    <select id="countSchools" resultType="int">
+        SELECT COUNT(*)
+        FROM school
+        WHERE id IN
+        <foreach collection="schoolIds" item="schoolId" open="(" separator="," close=")">
+            #{schoolId}
+        </foreach>
+    </select>
+
+    <sql id="regulatorColumns">
+        u.id,
+        u.username,
+        u.display_name AS displayName,
+        u.mobile,
+        u.enabled,
+        u.last_login_at AS lastLoginAt,
+        GROUP_CONCAT(
+            CASE WHEN scope.is_active THEN scope.school_id END
+            ORDER BY scope.school_id
+        ) AS schoolIds,
+        GROUP_CONCAT(
+            CASE WHEN scope.is_active THEN s.school_name END
+            ORDER BY s.school_name SEPARATOR '、'
+        ) AS schoolNames,
+        u.created_at AS createdAt,
+        u.updated_at AS updatedAt
+    </sql>
+
+    <select id="listRegulators" resultType="map">
+        SELECT <include refid="regulatorColumns"/>
+        FROM sys_user u
+        JOIN sys_role r ON r.id = u.role_id
+        LEFT JOIN regulator_school_scope scope
+          ON scope.regulator_user_id = u.id
+        LEFT JOIN school s ON s.id = scope.school_id
+        WHERE r.role_code = 'REGULATOR'
+        GROUP BY u.id
+        ORDER BY u.display_name, u.id
+    </select>
+
+    <select id="findRegulator" resultType="map">
+        SELECT <include refid="regulatorColumns"/>
+        FROM sys_user u
+        JOIN sys_role r ON r.id = u.role_id
+        LEFT JOIN regulator_school_scope scope
+          ON scope.regulator_user_id = u.id
+        LEFT JOIN school s ON s.id = scope.school_id
+        WHERE u.id = #{id}
+          AND r.role_code = 'REGULATOR'
+        GROUP BY u.id
+    </select>
+
+    <select id="findRegulatorByUsername" resultType="map">
+        SELECT <include refid="regulatorColumns"/>
+        FROM sys_user u
+        JOIN sys_role r ON r.id = u.role_id
+        LEFT JOIN regulator_school_scope scope
+          ON scope.regulator_user_id = u.id
+        LEFT JOIN school s ON s.id = scope.school_id
+        WHERE u.username = #{username}
+          AND r.role_code = 'REGULATOR'
+        GROUP BY u.id
+    </select>
+
+    <insert id="insertRegulator">
+        INSERT INTO sys_user (
+            school_id, role_id, username, password_hash, display_name, mobile, enabled
+        ) VALUES (
+            NULL,
+            (SELECT id FROM sys_role WHERE role_code = 'REGULATOR' AND enabled = TRUE),
+            #{username},
+            #{passwordHash},
+            #{displayName},
+            #{mobile},
+            #{enabled}
+        )
+    </insert>
+
+    <update id="updateRegulator">
+        UPDATE sys_user u
+        JOIN sys_role r ON r.id = u.role_id
+        SET u.username = #{username},
+            u.display_name = #{displayName},
+            u.mobile = #{mobile},
+            u.enabled = #{enabled}
+            <if test="passwordHash != null">, u.password_hash = #{passwordHash}</if>
+        WHERE u.id = #{id}
+          AND u.school_id IS NULL
+          AND r.role_code = 'REGULATOR'
+    </update>
+
+    <delete id="deleteRegulatorScopes">
+        UPDATE regulator_school_scope
+        SET is_active = FALSE
+        WHERE regulator_user_id = #{regulatorUserId}
+    </delete>
+
+    <insert id="insertRegulatorScope">
+        INSERT INTO regulator_school_scope (
+            regulator_user_id, school_id, assigned_by, is_active
+        ) VALUES (
+            #{regulatorUserId}, #{schoolId}, #{assignedBy}, TRUE
+        )
+        ON DUPLICATE KEY UPDATE
+            assigned_by = VALUES(assigned_by),
+            assigned_at = CURRENT_TIMESTAMP(3),
+            is_active = TRUE
+    </insert>
+
     <sql id="schoolAdminColumns">
         u.id,
         u.school_id AS schoolId,

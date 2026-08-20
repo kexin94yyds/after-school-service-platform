@@ -6,7 +6,7 @@ import { computed, onMounted, ref } from 'vue'
 
 import { enrollmentApi } from '@/api/enrollments'
 import { getErrorMessage } from '@/api/http'
-import type { Enrollment, EnrollmentStatus } from '@/api/types'
+import type { Enrollment, EnrollmentAction, EnrollmentStatus } from '@/api/types'
 import PageHeader from '@/components/PageHeader.vue'
 import {
   formatDateTime,
@@ -20,6 +20,21 @@ const error = ref('')
 const statusFilter = ref<EnrollmentStatus | ''>('')
 const keyword = ref('')
 const cancelingEnrollmentId = ref<number | null>(null)
+const rosterOfferingId = ref<number | null>(null)
+const actions = ref<EnrollmentAction[]>([])
+const actionDialogVisible = ref(false)
+const actionLoading = ref(false)
+
+const offeringOptions = computed(() =>
+  Array.from(
+    new Map(
+      enrollments.value.map((item) => [
+        item.offeringId,
+        { id: item.offeringId, label: `${item.courseName}（${item.offeringCode}）` },
+      ]),
+    ).values(),
+  ),
+)
 
 const filteredEnrollments = computed(() => {
   const search = keyword.value.trim().toLocaleLowerCase()
@@ -89,6 +104,19 @@ async function cancelEnrollment(enrollment: Enrollment): Promise<void> {
   }
 }
 
+async function showActions(enrollment: Enrollment): Promise<void> {
+  actionDialogVisible.value = true
+  actionLoading.value = true
+  try {
+    actions.value = await enrollmentApi.getActions(enrollment.id)
+  } catch (loadError) {
+    actions.value = []
+    ElMessage.error(getErrorMessage(loadError, '报名变更历史加载失败。'))
+  } finally {
+    actionLoading.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -125,6 +153,25 @@ onMounted(load)
           <el-option label="已报名" value="ENROLLED" />
           <el-option label="已取消" value="CANCELED" />
         </el-select>
+        <el-select
+          v-model="rosterOfferingId"
+          clearable
+          filterable
+          placeholder="选择开班导出名单"
+        >
+          <el-option
+            v-for="offering in offeringOptions"
+            :key="offering.id"
+            :label="offering.label"
+            :value="offering.id"
+          />
+        </el-select>
+        <el-button
+          :disabled="rosterOfferingId === null"
+          @click="rosterOfferingId && enrollmentApi.downloadRoster(rosterOfferingId)"
+        >
+          导出选课名单 Excel
+        </el-button>
       </div>
       <el-table
         v-loading="loading"
@@ -167,8 +214,9 @@ onMounted(load)
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="110" align="right">
+        <el-table-column label="操作" min-width="180" align="right">
           <template #default="{ row }">
+            <el-button text @click="showActions(row as Enrollment)">变更历史</el-button>
             <el-button
               v-if="row.status === 'ENROLLED'"
               text
@@ -189,5 +237,18 @@ onMounted(load)
         </template>
       </el-table>
     </section>
+
+    <el-dialog v-model="actionDialogVisible" title="报名变更历史" width="min(760px, calc(100vw - 32px))">
+      <el-table v-loading="actionLoading" :data="actions" table-layout="auto">
+        <el-table-column prop="actionType" label="动作" min-width="110">
+          <template #default="{ row }">{{ statusLabel(row.actionType) }}</template>
+        </el-table-column>
+        <el-table-column prop="courseName" label="课程" min-width="150" />
+        <el-table-column prop="actorName" label="操作人" min-width="110" />
+        <el-table-column prop="actedAt" label="时间" min-width="170">
+          <template #default="{ row }">{{ formatDateTime(row.actedAt) }}</template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
   </section>
 </template>

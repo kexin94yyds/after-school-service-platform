@@ -9,6 +9,7 @@ MANAGEMENT_SERVER_PORT=8082
 DB_URL='jdbc:mysql://db.example.internal:3306/after_school_service?connectionTimeZone=%2B08%3A00&forceConnectionTimeZoneToSession=true&sslMode=VERIFY_IDENTITY'
 DB_USERNAME=after_school_app
 APP_CORS_ALLOWED_ORIGIN='https://after-school.example'
+RECTIFICATION_MATERIAL_DIR=/var/lib/after-school-service/rectification-materials
 
 # Automatic supervision scan. The cron is a Spring six-field expression and
 # must stay quoted because it contains spaces. Manual scans remain available

@@ -23,6 +23,23 @@ public interface SupervisionMapper {
             @Param("termId") Long termId,
             @Param("threshold") BigDecimal threshold);
 
+    List<AlertDraft> findOverCapacityCandidates(
+            @Param("schoolId") Long schoolId,
+            @Param("termId") Long termId);
+
+    List<AlertDraft> findStaffShortageCandidates(
+            @Param("schoolId") Long schoolId,
+            @Param("termId") Long termId);
+
+    List<AlertDraft> findMissingAttendanceCandidates(
+            @Param("schoolId") Long schoolId,
+            @Param("termId") Long termId,
+            @Param("now") LocalDateTime now);
+
+    List<AlertDraft> findUnfiledOfferingCandidates(
+            @Param("schoolId") Long schoolId,
+            @Param("termId") Long termId);
+
     int insertAlert(
             @Param("draft") AlertDraft draft,
             @Param("deadline") LocalDateTime deadline,
@@ -50,6 +67,26 @@ public interface SupervisionMapper {
             @Param("toStatus") String toStatus,
             @Param("actionType") String actionType,
             @Param("comment") String comment);
+
+    int insertNotificationsForAlert(
+            @Param("schoolId") long schoolId,
+            @Param("alertId") long alertId,
+            @Param("notificationType") String notificationType,
+            @Param("title") String title,
+            @Param("content") String content);
+
+    List<Map<String, Object>> listNotifications(
+            @Param("regulatorUserId") long regulatorUserId,
+            @Param("unreadOnly") boolean unreadOnly);
+
+    int markNotificationRead(
+            @Param("id") long id,
+            @Param("regulatorUserId") long regulatorUserId,
+            @Param("readAt") LocalDateTime readAt);
+
+    int countRectificationNotice(@Param("alertId") long alertId);
+
+    int countRectificationMaterials(@Param("alertId") long alertId);
 
     int insertScanRun(
             @Param("id") String id,

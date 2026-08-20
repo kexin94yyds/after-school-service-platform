@@ -113,6 +113,14 @@ class EnrollmentRuleEngineTest {
     }
 
     @Test
+    void rejectsPublishedOfferingWithoutFiledPlanReferences() {
+        offering.setPlanStatus(null);
+
+        assertCode("OFFERING_NOT_FILED", () ->
+                rules.validate(student, offering, null, false, NOW));
+    }
+
+    @Test
     void rejectsEnrollmentAfterFirstSessionStarts() {
         offering.setEnrollmentEnd(LocalDateTime.of(2026, 12, 31, 23, 59));
         assertCode("ENROLLMENT_CLOSED_AFTER_START", () ->
@@ -194,6 +202,8 @@ class EnrollmentRuleEngineTest {
         value.setEnrolledCount(enrolledCount);
         value.setStatus(status);
         value.setCourseStatus("ACTIVE");
+        value.setTermStatus("ACTIVE");
+        value.setPlanStatus("FILED");
         return value;
     }
 }

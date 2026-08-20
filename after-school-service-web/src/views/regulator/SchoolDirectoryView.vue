@@ -5,6 +5,8 @@ import { ApiClientError, getErrorMessage } from '@/api/http'
 import { organizationApi } from '@/api/organization'
 import type {
   School,
+  RegulatorAccount,
+  RegulatorInput,
   SchoolAdminAccount,
   SchoolAdminInput,
   SchoolInput,
@@ -20,6 +22,9 @@ import { formNullableString, formString } from '@/utils/forms'
 import { formatDateTime, statusLabel } from '@/utils/format'
 
 const schools = ref<School[]>([])
+const regulators = ref<RegulatorAccount[]>([])
+const regulatorLoading = ref(false)
+const regulatorError = ref('')
 const loading = ref(false)
 const error = ref('')
 const selectedSchoolId = ref<number | null>(null)
@@ -31,6 +36,51 @@ let adminLoadVersion = 0
 const selectedSchool = computed(() =>
   schools.value.find((school) => school.id === selectedSchoolId.value),
 )
+
+const regulatorColumns: EntityColumn[] = [
+  { key: 'username', label: '监管账号', minWidth: 140 },
+  { key: 'displayName', label: '姓名', minWidth: 120 },
+  { key: 'mobile', label: '手机号', minWidth: 140 },
+  { key: 'schoolNames', label: '负责学校', minWidth: 240 },
+  {
+    key: 'enabled',
+    label: '状态',
+    minWidth: 90,
+    tag: true,
+    formatter: (value) => (value === true ? '启用' : '停用'),
+  },
+]
+
+const regulatorFields = computed<EntityField[]>(() => [
+  { key: 'username', label: '登录账号', kind: 'text', required: true },
+  { key: 'displayName', label: '姓名', kind: 'text', required: true },
+  { key: 'mobile', label: '手机号', kind: 'text' },
+  {
+    key: 'schoolIds',
+    label: '负责学校',
+    kind: 'select',
+    required: true,
+    multiple: true,
+    options: schools.value.map((school) => ({
+      label: school.schoolName,
+      value: school.id,
+    })),
+    valueFromRow: (value) => Array.isArray(value) ? value as number[] : [],
+  },
+  {
+    key: 'password',
+    label: '登录密码',
+    kind: 'password',
+    requiredOnCreate: true,
+    help: '新增时设置 12 至 72 个字符；编辑时留空表示不重置密码。',
+  },
+  {
+    key: 'enabled',
+    label: '允许登录',
+    kind: 'switch',
+    defaultValue: true,
+  },
+])
 
 const columns: EntityColumn[] = [
   { key: 'schoolCode', label: '学校编码', minWidth: 130 },
@@ -129,6 +179,51 @@ async function loadSchools(): Promise<void> {
   }
 }
 
+async function loadRegulators(): Promise<void> {
+  regulatorLoading.value = true
+  regulatorError.value = ''
+  try {
+    regulators.value = await organizationApi.getRegulators()
+  } catch (loadError) {
+    regulatorError.value = getErrorMessage(loadError, '监管账号加载失败。')
+  } finally {
+    regulatorLoading.value = false
+  }
+}
+
+async function saveRegulator(
+  values: FormValues,
+  id: number | null,
+): Promise<void> {
+  const password = formNullableString(values, 'password')
+  const schoolIds = Array.isArray(values.schoolIds)
+    ? values.schoolIds.map(Number)
+    : []
+  if (schoolIds.length === 0) {
+    throw new ApiClientError('请至少选择一所负责学校。', {
+      code: 'SCHOOL_SCOPE_REQUIRED',
+      fieldErrors: { schoolIds: '至少选择一所学校' },
+    })
+  }
+  if ((id === null && !password) || (password && password.length < 12)) {
+    throw new ApiClientError('登录密码至少需要 12 个字符。', {
+      code: 'INVALID_PASSWORD',
+      fieldErrors: { password: '请输入至少 12 个字符' },
+    })
+  }
+  const payload: RegulatorInput = {
+    username: formString(values, 'username'),
+    displayName: formString(values, 'displayName'),
+    mobile: formNullableString(values, 'mobile'),
+    password,
+    enabled: values.enabled === true,
+    schoolIds,
+  }
+  if (id === null) await organizationApi.createRegulator(payload)
+  else await organizationApi.updateRegulator({ id, ...payload })
+  await loadRegulators()
+}
+
 async function saveSchool(values: FormValues, id: number | null): Promise<void> {
   const payload: SchoolInput = {
     schoolCode: formString(values, 'schoolCode'),
@@ -219,7 +314,10 @@ watch(selectedSchoolId, (schoolId) => {
   void loadSchoolAdmins(schoolId)
 })
 
-onMounted(loadSchools)
+onMounted(async () => {
+  await loadSchools()
+  await loadRegulators()
+})
 </script>
 
 <template>
@@ -228,6 +326,17 @@ onMounted(loadSchools)
       kicker="区域基础数据"
       title="学校与管理员"
       description="维护接入学校及其管理账号。学校状态、账号权限和数据范围继续由服务端约束。"
+    />
+    <EntityCrudPanel
+      title="教育监管账号"
+      description="由监管人员开户注册、重置密码并分配负责学校；系统不开放公众自助注册。"
+      :rows="regulators"
+      :columns="regulatorColumns"
+      :fields="regulatorFields"
+      :loading="regulatorLoading"
+      :error="regulatorError"
+      :save="saveRegulator"
+      @retry="loadRegulators"
     />
     <EntityCrudPanel
       title="学校"

@@ -5,6 +5,9 @@ import jakarta.validation.constraints.Positive;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -44,10 +47,32 @@ public class EnrollmentController {
         return service.guardianAttendance(studentId);
     }
 
+    @GetMapping("/guardian/students/{studentId}/attendance/monthly")
+    @PreAuthorize("hasRole('GUARDIAN')")
+    Map<String, Object> guardianMonthlyAttendance(
+            @PathVariable long studentId,
+            @RequestParam String month) {
+        return service.guardianMonthlyAttendance(studentId, month);
+    }
+
     @GetMapping("/enrollments")
     @PreAuthorize("hasAnyRole('REGULATOR','SCHOOL_ADMIN','TEACHER','GUARDIAN')")
     List<Map<String, Object>> enrollments(@RequestParam(required = false) Long schoolId) {
         return service.enrollments(schoolId);
+    }
+
+    @GetMapping("/enrollments/roster.xlsx")
+    @PreAuthorize("hasAnyRole('REGULATOR','SCHOOL_ADMIN')")
+    ResponseEntity<byte[]> rosterXlsx(@RequestParam @Positive long offeringId) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"));
+        headers.setContentDisposition(ContentDisposition.attachment()
+                .filename("enrollment-roster.xlsx")
+                .build());
+        return ResponseEntity.ok()
+                .headers(headers)
+                .body(service.rosterXlsx(offeringId));
     }
 
     @PostMapping("/enrollments")
@@ -64,7 +89,23 @@ public class EnrollmentController {
         return ResponseEntity.noContent().build();
     }
 
+    @PostMapping("/enrollments/{id}/switch")
+    @PreAuthorize("hasRole('GUARDIAN')")
+    Map<String, Object> switchEnrollment(
+            @PathVariable long id,
+            @Valid @RequestBody EnrollmentSwitchRequest request) {
+        return service.switchEnrollment(id, request.newOfferingId());
+    }
+
+    @GetMapping("/enrollments/{id}/actions")
+    @PreAuthorize("hasAnyRole('REGULATOR','SCHOOL_ADMIN','GUARDIAN')")
+    List<Map<String, Object>> enrollmentActions(@PathVariable long id) {
+        return service.enrollmentActions(id);
+    }
+
     public record EnrollmentRequest(
             @Positive long studentId,
             @Positive long offeringId) {}
+
+    public record EnrollmentSwitchRequest(@Positive long newOfferingId) {}
 }

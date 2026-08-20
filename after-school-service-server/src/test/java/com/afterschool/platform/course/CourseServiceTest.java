@@ -332,6 +332,15 @@ class CourseServiceTest {
     }
 
     @Test
+    void rejectsPublishingOfferingWithoutFiledPlanAndStandardRoom() {
+        assertCode(
+                "PLANNING_REFERENCES_REQUIRED",
+                () -> service.updateOffering(10, request("PUBLISHED")));
+
+        verify(mapper, never()).offeringStatus(10, 1);
+    }
+
+    @Test
     void rejectsRoomConflictForDraftOfferingLinkedToAFiledPlan() {
         when(currentUser.schoolScope(1L)).thenReturn(1L);
         when(academicMapper.lockTerm(2)).thenReturn(term());

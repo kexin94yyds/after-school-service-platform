@@ -25,6 +25,8 @@ import {
   type SchoolRoom,
   type ServicePlan,
   type ServicePlanInput,
+  type ServicePlanItem,
+  type ServicePlanItemInput,
 } from '@/api/academic'
 import { ApiClientError, getErrorMessage } from '@/api/http'
 import EntityCrudPanel from '@/components/EntityCrudPanel.vue'
@@ -73,6 +75,10 @@ const calendarLoadVersion = ref(0)
 const plansLoadVersion = ref(0)
 const planKeyword = ref('')
 const submittingPlanId = ref<number | null>(null)
+const itemPlan = ref<ServicePlan | null>(null)
+const planItems = ref<ServicePlanItem[]>([])
+const planItemsLoading = ref(false)
+const planItemsError = ref('')
 
 const planDialogVisible = ref(false)
 const editingPlanId = ref<number | null>(null)
@@ -125,6 +131,57 @@ const filteredPlans = computed(() => {
     ].some((value) => value?.toLocaleLowerCase().includes(normalized)),
   )
 })
+
+const planItemColumns: EntityColumn[] = [
+  { key: 'category', label: '课程类型', minWidth: 140 },
+  { key: 'plannedCourseCount', label: '计划课程', minWidth: 100 },
+  { key: 'plannedClassCount', label: '计划开班', minWidth: 100 },
+  { key: 'capacityPerClass', label: '单班规模', minWidth: 100 },
+  { key: 'plannedTeacherCount', label: '师资人数', minWidth: 100 },
+  { key: 'notes', label: '配置说明', minWidth: 220 },
+]
+
+const planItemFields: EntityField[] = [
+  { key: 'category', label: '课程类型', kind: 'text', required: true },
+  { key: 'plannedCourseCount', label: '计划课程数', kind: 'number', required: true, min: 1 },
+  { key: 'plannedClassCount', label: '计划开班数', kind: 'number', required: true, min: 1 },
+  { key: 'capacityPerClass', label: '单班规模', kind: 'number', required: true, min: 1 },
+  { key: 'plannedTeacherCount', label: '计划师资人数', kind: 'number', required: true, min: 1 },
+  { key: 'notes', label: '师资与安全配置说明', kind: 'textarea' },
+]
+
+async function openPlanItems(plan: ServicePlan): Promise<void> {
+  itemPlan.value = plan
+  await loadPlanItems()
+}
+
+async function loadPlanItems(): Promise<void> {
+  if (!itemPlan.value) return
+  planItemsLoading.value = true
+  planItemsError.value = ''
+  try {
+    planItems.value = await academicApi.getServicePlanItems(itemPlan.value.id)
+  } catch (loadError) {
+    planItemsError.value = getErrorMessage(loadError, '计划明细加载失败。')
+  } finally {
+    planItemsLoading.value = false
+  }
+}
+
+async function savePlanItem(values: FormValues, id: number | null): Promise<void> {
+  if (!itemPlan.value) throw new ApiClientError('请先选择服务计划。')
+  const payload: ServicePlanItemInput = {
+    category: formString(values, 'category'),
+    plannedCourseCount: formNumber(values, 'plannedCourseCount'),
+    plannedClassCount: formNumber(values, 'plannedClassCount'),
+    capacityPerClass: formNumber(values, 'capacityPerClass'),
+    plannedTeacherCount: formNumber(values, 'plannedTeacherCount'),
+    notes: formNullableString(values, 'notes'),
+  }
+  if (id === null) await academicApi.createServicePlanItem(itemPlan.value.id, payload)
+  else await academicApi.updateServicePlanItem(itemPlan.value.id, id, payload)
+  await loadPlanItems()
+}
 
 const roomColumns: EntityColumn[] = [
   { key: 'roomCode', label: '教室编码', minWidth: 120 },
@@ -747,15 +804,12 @@ onMounted(async () => {
               </el-table-column>
               <el-table-column label="操作" min-width="155" align="right">
                 <template #default="{ row }">
-                  <div
-                    v-if="
-                      ['DRAFT', 'RETURNED'].includes(
-                        (row as ServicePlan).status,
-                      )
-                    "
-                    class="row-actions"
-                  >
+                  <div class="row-actions">
+                    <el-button text @click="openPlanItems(row as ServicePlan)">
+                      计划明细
+                    </el-button>
                     <el-button
+                      v-if="['DRAFT', 'RETURNED'].includes((row as ServicePlan).status)"
                       text
                       type="primary"
                       @click="openEditPlan(row as ServicePlan)"
@@ -763,6 +817,7 @@ onMounted(async () => {
                       编辑
                     </el-button>
                     <el-button
+                      v-if="['DRAFT', 'RETURNED'].includes((row as ServicePlan).status)"
                       text
                       type="warning"
                       :loading="submittingPlanId === (row as ServicePlan).id"
@@ -771,7 +826,6 @@ onMounted(async () => {
                       提交备案
                     </el-button>
                   </div>
-                  <span v-else class="no-action">内容已冻结</span>
                 </template>
               </el-table-column>
               <template #empty>
@@ -782,6 +836,20 @@ onMounted(async () => {
               </template>
             </el-table>
           </section>
+          <EntityCrudPanel
+            v-if="itemPlan"
+            :title="`${itemPlan.planName} · 备案明细`"
+            description="逐项填写课程类型、计划开班规模和师资配置；至少一条完整明细后才能提交备案。"
+            :rows="planItems"
+            :columns="planItemColumns"
+            :fields="planItemFields"
+            :loading="planItemsLoading"
+            :error="planItemsError"
+            :save="savePlanItem"
+            :can-create="['DRAFT', 'RETURNED'].includes(itemPlan.status)"
+            :can-edit="['DRAFT', 'RETURNED'].includes(itemPlan.status)"
+            @retry="loadPlanItems"
+          />
         </el-tab-pane>
 
         <el-tab-pane label="教室资源" name="rooms">

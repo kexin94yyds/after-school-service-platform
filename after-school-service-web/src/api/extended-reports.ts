@@ -31,6 +31,19 @@ export interface CoursePerformanceRow {
   evaluationCount: number
   averageRating: number
   satisfactionRate: number
+  averageTeacherRating: number
+  teacherSatisfactionRate: number
+}
+
+export interface RectificationReportRow {
+  schoolId: number
+  schoolName: string
+  alertType: string
+  severity: string
+  status: string
+  alertCount: number
+  overdueCount: number
+  averageCloseHours: number
 }
 
 function filenameFromDisposition(disposition: unknown): string {
@@ -85,4 +98,46 @@ export const extendedReportsApi = {
     anchor.remove()
     URL.revokeObjectURL(url)
   },
+  async downloadCoursePerformanceXlsx(
+    filters: CoursePerformanceFilters = {},
+  ): Promise<void> {
+    await downloadXlsx('/reports/course-performance.xlsx', filters, 'course-performance.xlsx')
+  },
+  async getRectifications(filters: {
+    schoolId?: number | null
+    detectedFrom?: string
+    detectedTo?: string
+  } = {}): Promise<RectificationReportRow[]> {
+    const response = await http.get<RectificationReportRow[]>('/reports/rectifications', {
+      params: compactQuery(filters),
+    })
+    return response.data
+  },
+  async downloadRectificationsXlsx(filters: {
+    schoolId?: number | null
+    detectedFrom?: string
+    detectedTo?: string
+  } = {}): Promise<void> {
+    await downloadXlsx('/reports/rectifications.xlsx', filters, 'rectification-report.xlsx')
+  },
+}
+
+async function downloadXlsx(
+  path: string,
+  filters: object,
+  filename: string,
+): Promise<void> {
+  const response = await http.get<Blob>(path, {
+    params: compactQuery(filters),
+    responseType: 'blob',
+  })
+  const blob = response.data instanceof Blob ? response.data : new Blob([response.data])
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
 }

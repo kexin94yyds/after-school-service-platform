@@ -49,6 +49,12 @@ public class EnrollmentRuleEngine {
         if (!"ACTIVE".equals(offering.getCourseStatus())) {
             throw ApiException.conflict("COURSE_INACTIVE", "该课程已停用，不能继续报名");
         }
+        if (offering.getTermStatus() == null
+                || offering.getPlanStatus() == null) {
+            throw ApiException.conflict(
+                    "OFFERING_NOT_FILED",
+                    "开班未关联已备案服务计划，不能报名");
+        }
         if (isClosedStatus(offering.getTermStatus())) {
             throw ApiException.conflict(
                     "TERM_CLOSED", "开班所属学期已结束或归档，不能报名");
@@ -56,6 +62,12 @@ public class EnrollmentRuleEngine {
         if (isClosedStatus(offering.getPlanStatus())) {
             throw ApiException.conflict(
                     "SERVICE_PLAN_CLOSED", "开班所属服务计划已结束或归档，不能报名");
+        }
+        if (!"FILED".equals(offering.getPlanStatus())
+                && !"ACTIVE".equals(offering.getPlanStatus())) {
+            throw ApiException.conflict(
+                    "SERVICE_PLAN_NOT_FILED",
+                    "开班所属服务计划尚未完成备案，不能报名");
         }
         if (now.isBefore(offering.getEnrollmentStart()) || now.isAfter(offering.getEnrollmentEnd())) {
             throw ApiException.conflict("OUTSIDE_ENROLLMENT_WINDOW", "当前不在报名开放时间内");

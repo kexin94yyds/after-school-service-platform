@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.afterschool.platform.rectification.RectificationMapper">
+    <select id="findAlert" resultType="map">
+        SELECT id,
+               school_id AS schoolId,
+               status,
+               title,
+               rectification_deadline AS rectificationDeadline
+        FROM supervision_alert
+        WHERE id = #{alertId}
+          <if test="schoolId != null">
+              AND school_id = #{schoolId}
+          </if>
+    </select>
+
+    <select id="findNotice" resultType="map">
+        SELECT notice.id,
+               notice.school_id AS schoolId,
+               notice.alert_id AS alertId,
+               notice.title,
+               notice.requirements,
+               notice.due_at AS dueAt,
+               notice.issued_by AS issuedBy,
+               issuer.display_name AS issuedByName,
+               notice.issued_at AS issuedAt,
+               notice.updated_at AS updatedAt
+        FROM rectification_notice notice
+        JOIN sys_user issuer ON issuer.id = notice.issued_by
+        WHERE notice.alert_id = #{alertId}
+          <if test="schoolId != null">
+              AND notice.school_id = #{schoolId}
+          </if>
+    </select>
+
+    <insert id="upsertNotice">
+        INSERT INTO rectification_notice (
+            school_id, alert_id, title, requirements, due_at, issued_by
+        ) VALUES (
+            #{schoolId}, #{alertId}, #{title}, #{requirements}, #{dueAt}, #{issuedBy}
+        )
+        ON DUPLICATE KEY UPDATE
+            title = VALUES(title),
+            requirements = VALUES(requirements),
+            due_at = VALUES(due_at),
+            issued_by = VALUES(issued_by),
+            issued_at = CURRENT_TIMESTAMP(3)
+    </insert>
+
+    <update id="updateAlertDeadline">
+        UPDATE supervision_alert
+        SET rectification_deadline = #{dueAt}
+        WHERE id = #{alertId}
+          AND school_id = #{schoolId}
+          AND status &lt;> 'CLOSED'
+    </update>
+
+    <insert id="insertAction">
+        INSERT INTO supervision_alert_action (
+            school_id,
+            alert_id,
+            from_status,
+            to_status,
+            action_type,
+            comment,
+            actor_id,
+            actor_role
+        ) VALUES (
+            #{schoolId},
+            #{alertId},
+            #{status},
+            #{status},
+            #{actionType},
+            #{comment},
+            #{actorId},
+            #{actorRole}
+        )
+    </insert>
+
+    <insert id="insertMaterial">
+        INSERT INTO rectification_material (
+            school_id,
+            alert_id,
+            notice_id,
+            original_name,
+            object_key,
+            content_type,
+            size_bytes,
+            sha256,
+            uploaded_by
+        ) VALUES (
+            #{schoolId},
+            #{alertId},
+            #{noticeId},
+            #{originalName},
+            #{objectKey},
+            #{contentType},
+            #{sizeBytes},
+            #{sha256},
+            #{uploadedBy}
+        )
+    </insert>
+
+    <sql id="materialColumns">
+        material.id,
+        material.school_id AS schoolId,
+        material.alert_id AS alertId,
+        material.notice_id AS noticeId,
+        material.original_name AS originalName,
+        material.object_key AS objectKey,
+        material.content_type AS contentType,
+        material.size_bytes AS sizeBytes,
+        material.sha256,
+        material.uploaded_by AS uploadedBy,
+        uploader.display_name AS uploadedByName,
+        material.uploaded_at AS uploadedAt
+    </sql>
+
+    <select id="findMaterialByObjectKey" resultType="map">
+        SELECT <include refid="materialColumns"/>
+        FROM rectification_material material
+        JOIN sys_user uploader ON uploader.id = material.uploaded_by
+        WHERE material.object_key = #{objectKey}
+          <if test="schoolId != null">
+              AND material.school_id = #{schoolId}
+          </if>
+    </select>
+
+    <select id="findMaterial" resultType="map">
+        SELECT <include refid="materialColumns"/>
+        FROM rectification_material material
+        JOIN sys_user uploader ON uploader.id = material.uploaded_by
+        WHERE material.id = #{id}
+          <if test="schoolId != null">
+              AND material.school_id = #{schoolId}
+          </if>
+    </select>
+
+    <select id="listMaterials" resultType="map">
+        SELECT <include refid="materialColumns"/>
+        FROM rectification_material material
+        JOIN sys_user uploader ON uploader.id = material.uploaded_by
+        WHERE material.alert_id = #{alertId}
+          <if test="schoolId != null">
+              AND material.school_id = #{schoolId}
+          </if>
+        ORDER BY material.uploaded_at DESC, material.id DESC
+    </select>
+</mapper>

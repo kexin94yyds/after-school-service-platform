@@ -14,6 +14,9 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.List;
 import java.util.Map;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -24,6 +27,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/api")
@@ -39,6 +44,24 @@ public class CourseController {
     @PreAuthorize("hasAnyRole('REGULATOR','SCHOOL_ADMIN','TEACHER')")
     List<Map<String, Object>> courses(@RequestParam(required = false) Long schoolId) {
         return service.courses(schoolId);
+    }
+
+    @GetMapping(value = "/courses.xlsx")
+    @PreAuthorize("hasAnyRole('REGULATOR','SCHOOL_ADMIN')")
+    ResponseEntity<byte[]> exportCourses(@RequestParam(required = false) Long schoolId) {
+        return xlsx("courses.xlsx", service.coursesXlsx(schoolId));
+    }
+
+    @GetMapping(value = "/courses/import-template.xlsx")
+    @PreAuthorize("hasRole('SCHOOL_ADMIN')")
+    ResponseEntity<byte[]> courseImportTemplate() {
+        return xlsx("course-import-template.xlsx", service.courseImportTemplate());
+    }
+
+    @PostMapping(value = "/courses/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasRole('SCHOOL_ADMIN')")
+    Map<String, Object> importCourses(@RequestPart("file") MultipartFile file) {
+        return service.importCourses(file);
     }
 
     @PostMapping("/courses")
@@ -104,4 +127,14 @@ public class CourseController {
             @Positive Long termId,
             @Positive Long planId,
             @Positive Long roomId) {}
+
+    private ResponseEntity<byte[]> xlsx(String filename, byte[] body) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"));
+        headers.setContentDisposition(ContentDisposition.attachment()
+                .filename(filename)
+                .build());
+        return ResponseEntity.ok().headers(headers).body(body);
+    }
 }

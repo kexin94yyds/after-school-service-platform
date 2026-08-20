@@ -85,6 +85,44 @@ public interface AcademicMapper {
 
     int countPlanOfferingDependencies(@Param("planId") long planId);
 
+    int countPlanItems(@Param("planId") long planId);
+
+    List<Map<String, Object>> listServicePlanItems(
+            @Param("planId") long planId,
+            @Param("schoolId") Long schoolId);
+
+    Map<String, Object> findServicePlanItem(
+            @Param("id") long id,
+            @Param("planId") long planId,
+            @Param("schoolId") long schoolId);
+
+    int insertServicePlanItem(
+            @Param("schoolId") long schoolId,
+            @Param("planId") long planId,
+            @Param("category") String category,
+            @Param("plannedCourseCount") int plannedCourseCount,
+            @Param("plannedClassCount") int plannedClassCount,
+            @Param("capacityPerClass") int capacityPerClass,
+            @Param("plannedTeacherCount") int plannedTeacherCount,
+            @Param("notes") String notes,
+            @Param("createdBy") long createdBy);
+
+    int updateServicePlanItem(
+            @Param("id") long id,
+            @Param("schoolId") long schoolId,
+            @Param("planId") long planId,
+            @Param("category") String category,
+            @Param("plannedCourseCount") int plannedCourseCount,
+            @Param("plannedClassCount") int plannedClassCount,
+            @Param("capacityPerClass") int capacityPerClass,
+            @Param("plannedTeacherCount") int plannedTeacherCount,
+            @Param("notes") String notes);
+
+    int deleteServicePlanItem(
+            @Param("id") long id,
+            @Param("planId") long planId,
+            @Param("schoolId") long schoolId);
+
     List<Map<String, Object>> listRooms(@Param("schoolId") Long schoolId);
 
     Map<String, Object> findRoomByCode(

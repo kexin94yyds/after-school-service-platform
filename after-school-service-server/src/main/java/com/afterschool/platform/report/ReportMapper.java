@@ -26,4 +26,9 @@ public interface ReportMapper {
             @Param("toDate") LocalDate toDate,
             @Param("category") String category,
             @Param("status") String status);
+
+    List<Map<String, Object>> rectificationBreakdown(
+            @Param("schoolId") Long schoolId,
+            @Param("detectedFrom") LocalDate detectedFrom,
+            @Param("detectedTo") LocalDate detectedTo);
 }

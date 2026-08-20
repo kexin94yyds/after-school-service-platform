@@ -174,6 +174,145 @@
                ) / COUNT(a.id) &lt; #{threshold}
     </select>
 
+    <select id="findMissingAttendanceCandidates" resultMap="alertDraft">
+        SELECT ls.school_id,
+               ls.offering_id,
+               ls.id AS session_id,
+               'MISSING_ATTENDANCE' AS alert_type,
+               CONCAT('SESSION:', ls.id) AS dedup_key,
+               'HIGH' AS severity,
+               '课次考勤缺失' AS title,
+               CONCAT(
+                   '课次已结束，但仍有 ',
+                   COUNT(DISTINCT e.student_id) - COUNT(DISTINCT a.student_id),
+                   ' 名学生缺少考勤记录'
+               ) AS description,
+               COUNT(DISTINCT e.student_id) - COUNT(DISTINCT a.student_id)
+                   AS metric_value,
+               0 AS threshold_value
+        FROM lesson_session ls
+        JOIN course_offering o ON o.id = ls.offering_id
+        JOIN enrollment e
+          ON e.offering_id = ls.offering_id
+         AND e.enrolled_at &lt;= TIMESTAMP(ls.session_date, ls.start_time)
+         AND (
+             e.canceled_at IS NULL
+             OR e.canceled_at &gt;= TIMESTAMP(ls.session_date, ls.start_time)
+         )
+        LEFT JOIN attendance a
+          ON a.session_id = ls.id
+         AND a.student_id = e.student_id
+        WHERE ls.status = 'SCHEDULED'
+          AND TIMESTAMP(ls.session_date, ls.end_time) &lt; #{now}
+          <if test="schoolId != null">
+              AND ls.school_id = #{schoolId}
+          </if>
+          <if test="termId != null">
+              AND o.term_id = #{termId}
+          </if>
+        GROUP BY ls.id, ls.school_id, ls.offering_id
+        HAVING COUNT(DISTINCT e.student_id) > COUNT(DISTINCT a.student_id)
+    </select>
+
+    <select id="findOverCapacityCandidates" resultMap="alertDraft">
+        SELECT o.school_id,
+               o.id AS offering_id,
+               NULL AS session_id,
+               'OVER_CAPACITY' AS alert_type,
+               CONCAT('OFFERING:', o.id) AS dedup_key,
+               'HIGH' AS severity,
+               '开班规模超过资源容量' AS title,
+               CONCAT(
+                   '开班容量为 ', o.capacity,
+                   ' 人，标准教室容量为 ', COALESCE(room.capacity, 0), ' 人'
+               ) AS description,
+               o.capacity AS metric_value,
+               COALESCE(room.capacity, 0) AS threshold_value
+        FROM course_offering o
+        LEFT JOIN school_room room
+          ON room.id = o.room_id
+         AND room.school_id = o.school_id
+        WHERE o.status IN ('PUBLISHED', 'CLOSED')
+          AND (room.id IS NULL OR o.capacity > room.capacity)
+          <if test="schoolId != null">
+              AND o.school_id = #{schoolId}
+          </if>
+          <if test="termId != null">
+              AND o.term_id = #{termId}
+          </if>
+    </select>
+
+    <select id="findStaffShortageCandidates" resultMap="alertDraft">
+        SELECT plan.school_id,
+               MIN(offering.id) AS offering_id,
+               NULL AS session_id,
+               'STAFF_SHORTAGE' AS alert_type,
+               CONCAT('PLAN_ITEM:', item.id) AS dedup_key,
+               'HIGH' AS severity,
+               '服务计划师资配置不足' AS title,
+               CONCAT(
+                   item.category, '计划需要 ', item.planned_teacher_count,
+                   ' 名教师，当前仅配置 ', COUNT(DISTINCT offering.teacher_id), ' 名'
+               ) AS description,
+               COUNT(DISTINCT offering.teacher_id) AS metric_value,
+               item.planned_teacher_count AS threshold_value
+        FROM service_plan_item item
+        JOIN school_service_plan plan ON plan.id = item.plan_id
+        JOIN course course
+          ON course.school_id = item.school_id
+         AND course.category = item.category
+        JOIN course_offering offering
+          ON offering.plan_id = item.plan_id
+         AND offering.course_id = course.id
+         AND offering.status NOT IN ('CANCELED', 'FINISHED')
+        WHERE plan.status IN ('FILED', 'ACTIVE')
+          <if test="schoolId != null">
+              AND plan.school_id = #{schoolId}
+          </if>
+          <if test="termId != null">
+              AND plan.term_id = #{termId}
+          </if>
+        GROUP BY item.id,
+                 plan.school_id,
+                 item.category,
+                 item.planned_teacher_count
+        HAVING COUNT(DISTINCT offering.teacher_id) &lt; item.planned_teacher_count
+    </select>
+
+    <select id="findUnfiledOfferingCandidates" resultMap="alertDraft">
+        SELECT o.school_id,
+               o.id AS offering_id,
+               NULL AS session_id,
+               'UNFILED_OFFERING' AS alert_type,
+               CONCAT('OFFERING:', o.id) AS dedup_key,
+               'HIGH' AS severity,
+               '未备案开课' AS title,
+               '开班已发布，但未完整关联有效学期、备案计划和标准教室' AS description,
+               1 AS metric_value,
+               0 AS threshold_value
+        FROM course_offering o
+        LEFT JOIN school_service_plan plan
+          ON plan.id = o.plan_id
+         AND plan.school_id = o.school_id
+        LEFT JOIN school_room room
+          ON room.id = o.room_id
+         AND room.school_id = o.school_id
+        WHERE o.status IN ('PUBLISHED', 'CLOSED')
+          AND (
+              o.term_id IS NULL
+              OR o.plan_id IS NULL
+              OR o.room_id IS NULL
+              OR plan.status NOT IN ('FILED', 'ACTIVE')
+              OR room.status &lt;> 'ACTIVE'
+          )
+          <if test="schoolId != null">
+              AND o.school_id = #{schoolId}
+          </if>
+          <if test="termId != null">
+              AND o.term_id = #{termId}
+          </if>
+    </select>
+
     <insert id="insertAlert">
         INSERT INTO supervision_alert (
             school_id,
@@ -259,6 +398,81 @@
             'SYSTEM'
         )
     </insert>
+
+    <insert id="insertNotificationsForAlert">
+        INSERT INTO regulator_notification (
+            regulator_user_id,
+            school_id,
+            alert_id,
+            notification_type,
+            title,
+            content
+        )
+        SELECT scope.regulator_user_id,
+               #{schoolId},
+               #{alertId},
+               #{notificationType},
+               #{title},
+               #{content}
+        FROM regulator_school_scope scope
+        JOIN sys_user regulator
+          ON regulator.id = scope.regulator_user_id
+         AND regulator.enabled = TRUE
+        WHERE scope.school_id = #{schoolId}
+          AND scope.is_active = TRUE
+        ON DUPLICATE KEY UPDATE
+            title = VALUES(title),
+            content = VALUES(content),
+            is_read = FALSE,
+            read_at = NULL,
+            created_at = CURRENT_TIMESTAMP(3)
+    </insert>
+
+    <select id="listNotifications" resultType="map">
+        SELECT notification.id,
+               notification.school_id AS schoolId,
+               school.school_name AS schoolName,
+               notification.alert_id AS alertId,
+               notification.notification_type AS notificationType,
+               notification.title,
+               notification.content,
+               notification.is_read AS isRead,
+               notification.read_at AS readAt,
+               notification.created_at AS createdAt,
+               alert.severity,
+               alert.status AS alertStatus
+        FROM regulator_notification notification
+        JOIN school ON school.id = notification.school_id
+        JOIN supervision_alert alert ON alert.id = notification.alert_id
+        WHERE notification.regulator_user_id = #{regulatorUserId}
+          <if test="unreadOnly">
+              AND notification.is_read = FALSE
+          </if>
+        ORDER BY notification.is_read,
+                 notification.created_at DESC,
+                 notification.id DESC
+    </select>
+
+    <update id="markNotificationRead">
+        UPDATE regulator_notification
+        SET is_read = TRUE,
+            read_at = #{readAt}
+        WHERE id = #{id}
+          AND regulator_user_id = #{regulatorUserId}
+          AND is_read = FALSE
+    </update>
+
+    <select id="countRectificationNotice" resultType="int">
+        SELECT COUNT(*)
+        FROM rectification_notice
+        WHERE alert_id = #{alertId}
+    </select>
+
+    <select id="countRectificationMaterials" resultType="int">
+        SELECT COUNT(*)
+        FROM rectification_material
+        WHERE alert_id = #{alertId}
+    </select>
 
     <insert id="insertScanRun">
         INSERT INTO supervision_scan_run (

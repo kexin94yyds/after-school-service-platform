@@ -24,21 +24,31 @@ public class EvaluationService {
         this.currentUser = currentUser;
     }
 
+    Map<String, Object> submit(
+            long studentId,
+            long offeringId,
+            int rating,
+            String requestedComment) {
+        return submit(studentId, offeringId, rating, rating, requestedComment);
+    }
+
     @Transactional
     public Map<String, Object> submit(
             long studentId,
             long offeringId,
-            int rating,
+            Integer courseRating,
+            Integer teacherRating,
             String requestedComment) {
         PlatformPrincipal principal = currentUser.principal();
         if (!"GUARDIAN".equals(principal.roleCode())
                 || principal.guardianId() == null) {
             throw ApiException.forbidden("只有有效家长账号可以提交课程评价");
         }
-        if (rating < 1 || rating > 5) {
+        if (courseRating == null || courseRating < 1 || courseRating > 5
+                || teacherRating == null || teacherRating < 1 || teacherRating > 5) {
             throw ApiException.badRequest(
                     "INVALID_RATING",
-                    "课程评分必须在 1 到 5 之间");
+                    "课程评分和教师评分必须在 1 到 5 之间");
         }
         if (principal.schoolId() == null) {
             throw ApiException.forbidden("当前家长账号没有学校数据权限");
@@ -76,7 +86,8 @@ public class EvaluationService {
                             eligibility.getEnrollmentId(),
                             studentId,
                             principal.guardianId(),
-                            rating,
+                            courseRating,
+                            teacherRating,
                             comment)
                     != 1) {
                 throw ApiException.conflict(

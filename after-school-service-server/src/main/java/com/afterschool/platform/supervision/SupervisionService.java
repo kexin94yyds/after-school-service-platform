@@ -39,7 +39,11 @@ public class SupervisionService {
     private static final Set<String> ALERT_TYPES = Set.of(
             "OVERDUE_ATTENDANCE",
             "OFFERING_NO_SESSIONS",
-            "LOW_ATTENDANCE");
+            "LOW_ATTENDANCE",
+            "OVER_CAPACITY",
+            "STAFF_SHORTAGE",
+            "MISSING_ATTENDANCE",
+            "UNFILED_OFFERING");
     private static final Set<String> STATUSES = Set.of(
             "OPEN",
             "ACKNOWLEDGED",
@@ -406,7 +410,7 @@ public class SupervisionService {
             ScanParameters parameters) {
         LocalDateTime now = LocalDateTime.now(clock);
         List<AlertDraft> candidates = new ArrayList<>();
-        candidates.addAll(mapper.findOverdueAttendanceCandidates(
+        candidates.addAll(mapper.findMissingAttendanceCandidates(
                 schoolId, parameters.termId(), now));
         candidates.addAll(mapper.findOfferingsWithoutSessions(
                 schoolId, parameters.termId(), now));
@@ -414,6 +418,12 @@ public class SupervisionService {
                 schoolId,
                 parameters.termId(),
                 parameters.lowAttendanceThreshold()));
+        candidates.addAll(mapper.findOverCapacityCandidates(
+                schoolId, parameters.termId()));
+        candidates.addAll(mapper.findStaffShortageCandidates(
+                schoolId, parameters.termId()));
+        candidates.addAll(mapper.findUnfiledOfferingCandidates(
+                schoolId, parameters.termId()));
 
         Map<String, Integer> createdByType = new LinkedHashMap<>();
         for (String type : ALERT_TYPES) {
@@ -456,6 +466,12 @@ public class SupervisionService {
                         run.operatorUserId(),
                         "REGULATOR");
             }
+            mapper.insertNotificationsForAlert(
+                    draft.getSchoolId(),
+                    identity.getId(),
+                    "SUPERVISION_ALERT",
+                    draft.getTitle(),
+                    draft.getDescription());
             created++;
             createdByType.computeIfPresent(
                     draft.getAlertType(), (ignored, count) -> count + 1);
@@ -593,6 +609,22 @@ public class SupervisionService {
                     "INVALID_ALERT_TRANSITION",
                     "当前角色不能执行该预警状态流转");
         }
+        if ("SCHOOL_ADMIN".equals(principal.roleCode())
+                && "OPEN".equals(alert.getStatus())
+                && "ACKNOWLEDGED".equals(target)
+                && mapper.countRectificationNotice(id) == 0) {
+            throw ApiException.conflict(
+                    "RECTIFICATION_NOTICE_REQUIRED",
+                    "监管人员下发整改通知后才能接收预警");
+        }
+        if ("SCHOOL_ADMIN".equals(principal.roleCode())
+                && "RECTIFYING".equals(alert.getStatus())
+                && "WAITING_VERIFY".equals(target)
+                && mapper.countRectificationMaterials(id) == 0) {
+            throw ApiException.conflict(
+                    "RECTIFICATION_MATERIAL_REQUIRED",
+                    "提交监管复核前必须上传整改材料");
+        }
         if (mapper.updateStatus(id, alert.getStatus(), target) != 1) {
             throw ApiException.conflict(
                     "ALERT_CHANGED",
@@ -607,6 +639,14 @@ public class SupervisionService {
                 comment,
                 principal.id(),
                 principal.roleCode());
+        if ("WAITING_VERIFY".equals(target)) {
+            mapper.insertNotificationsForAlert(
+                    alert.getSchoolId(),
+                    id,
+                    "RECTIFICATION_SUBMITTED",
+                    "学校已提交整改复核",
+                    comment);
+        }
         return mapper.listAlerts(
                         alert.getSchoolId(), null, null, null, null)
                 .stream()
@@ -626,6 +666,27 @@ public class SupervisionService {
             throw ApiException.notFound("预警不存在或不在当前数据范围内");
         }
         return mapper.listActions(id, schoolScope);
+    }
+
+    public List<Map<String, Object>> notifications(boolean unreadOnly) {
+        PlatformPrincipal principal = currentUser.principal();
+        if (!"REGULATOR".equals(principal.roleCode())) {
+            throw ApiException.forbidden("只有监管账号可以查看预警通知");
+        }
+        return mapper.listNotifications(principal.id(), unreadOnly);
+    }
+
+    @Transactional
+    public void markNotificationRead(long id) {
+        PlatformPrincipal principal = currentUser.principal();
+        if (!"REGULATOR".equals(principal.roleCode())) {
+            throw ApiException.forbidden("只有监管账号可以处理预警通知");
+        }
+        if (mapper.markNotificationRead(
+                        id, principal.id(), LocalDateTime.now(clock))
+                != 1) {
+            throw ApiException.notFound("通知不存在或不属于当前监管账号");
+        }
     }
 
     private String allowedAction(String role, String from, String to) {

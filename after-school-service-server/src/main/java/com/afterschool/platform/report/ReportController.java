@@ -66,4 +66,46 @@ public class ReportController {
                 .build());
         return ResponseEntity.ok().headers(headers).body(csv);
     }
+
+    @GetMapping(value = "/course-performance.xlsx")
+    ResponseEntity<byte[]> coursePerformanceXlsx(
+            @RequestParam(required = false) Long schoolId,
+            @RequestParam(required = false) Long termId,
+            @RequestParam(required = false) LocalDate fromDate,
+            @RequestParam(required = false) LocalDate toDate,
+            @RequestParam(required = false) String category,
+            @RequestParam(required = false) String status) {
+        return xlsx(
+                "course-performance.xlsx",
+                service.coursePerformanceXlsx(
+                        schoolId, termId, fromDate, toDate, category, status));
+    }
+
+    @GetMapping("/rectifications")
+    List<Map<String, Object>> rectifications(
+            @RequestParam(required = false) Long schoolId,
+            @RequestParam(required = false) LocalDate detectedFrom,
+            @RequestParam(required = false) LocalDate detectedTo) {
+        return service.rectifications(schoolId, detectedFrom, detectedTo);
+    }
+
+    @GetMapping(value = "/rectifications.xlsx")
+    ResponseEntity<byte[]> rectificationsXlsx(
+            @RequestParam(required = false) Long schoolId,
+            @RequestParam(required = false) LocalDate detectedFrom,
+            @RequestParam(required = false) LocalDate detectedTo) {
+        return xlsx(
+                "rectification-report.xlsx",
+                service.rectificationsXlsx(schoolId, detectedFrom, detectedTo));
+    }
+
+    private ResponseEntity<byte[]> xlsx(String filename, byte[] body) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"));
+        headers.setContentDisposition(ContentDisposition.attachment()
+                .filename(filename)
+                .build());
+        return ResponseEntity.ok().headers(headers).body(body);
+    }
 }

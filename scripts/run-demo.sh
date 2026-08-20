@@ -8,7 +8,7 @@ Usage: run-demo.sh [after-school-service-server-...-demo.jar]
 
 Launch only the separately packaged demo artifact against the dedicated local
 after_school_demo database. Set DEMO_DB_PASSWORD and optionally
-DEMO_DB_USERNAME / DEMO_MYSQL_PORT before invoking this script.
+DEMO_DB_USERNAME / DEMO_MYSQL_PORT / DEMO_MANAGEMENT_PORT before invoking this script.
 EOF
   exit 2
 }
@@ -30,11 +30,18 @@ java_bin="${JAVA_BIN:-java}"
   || fail "DEMO_DB_PASSWORD must be set for the dedicated demo database"
 demo_username="${DEMO_DB_USERNAME:-after_school_demo}"
 demo_port="${DEMO_MYSQL_PORT:-3306}"
+demo_management_port="${DEMO_MANAGEMENT_PORT:-8082}"
 [[ "${demo_username}" =~ ^[A-Za-z0-9_]{1,32}$ ]] \
   || fail "DEMO_DB_USERNAME must contain only letters, digits and underscore"
 [[ "${demo_port}" =~ ^[0-9]{1,5}$ && "${demo_port}" -ge 1 \
     && "${demo_port}" -le 65535 ]] \
   || fail "DEMO_MYSQL_PORT must be between 1 and 65535"
+[[ "${demo_management_port}" =~ ^[0-9]{1,5}$ \
+    && "${demo_management_port}" -ge 1 \
+    && "${demo_management_port}" -le 65535 ]] \
+  || fail "DEMO_MANAGEMENT_PORT must be between 1 and 65535"
+[[ "${demo_management_port}" != "8081" ]] \
+  || fail "DEMO_MANAGEMENT_PORT must differ from the application port 8081"
 command -v "${java_bin}" >/dev/null 2>&1 \
   || fail "Java command not found: ${java_bin}"
 
@@ -51,7 +58,8 @@ for required_entry in \
   'BOOT-INF/classes/db/demo/V4__seed_demo_workflow.sql' \
   'BOOT-INF/classes/db/demo/V4_1__seed_demo_scan_run_parent.sql' \
   'BOOT-INF/classes/db/demo/V8__seed_comprehensive_graduation_workflow.sql' \
-  'BOOT-INF/classes/db/demo/V11__simplify_demo_login_credentials.sql'; do
+  'BOOT-INF/classes/db/demo/V11__simplify_demo_login_credentials.sql' \
+  'BOOT-INF/classes/db/demo/V15__align_demo_with_opening_report.sql'; do
   "${jar_bin}" tf "${demo_jar}" | grep -Fxq "${required_entry}" \
     || fail "JAR is not the separately packaged demo artifact: ${required_entry} is absent"
 done
@@ -65,6 +73,7 @@ exec env -i \
   SPRING_PROFILES_ACTIVE=demo \
   SERVER_ADDRESS=127.0.0.1 \
   MANAGEMENT_SERVER_ADDRESS=127.0.0.1 \
+  MANAGEMENT_SERVER_PORT="${demo_management_port}" \
   DEMO_MYSQL_PORT="${demo_port}" \
   DEMO_DB_USERNAME="${demo_username}" \
   DEMO_DB_PASSWORD="${DEMO_DB_PASSWORD}" \

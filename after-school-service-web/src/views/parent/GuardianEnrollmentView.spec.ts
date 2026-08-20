@@ -22,6 +22,7 @@ const {
   getEnrollmentsMock,
   getGuardianStudentsMock,
   getStudentAttendanceMock,
+  getStudentMonthlyAttendanceMock,
   getStudentOfferingsMock,
 } = vi.hoisted(() => ({
   cancelMock: vi.fn(),
@@ -29,6 +30,7 @@ const {
   getEnrollmentsMock: vi.fn(),
   getGuardianStudentsMock: vi.fn(),
   getStudentAttendanceMock: vi.fn(),
+  getStudentMonthlyAttendanceMock: vi.fn(),
   getStudentOfferingsMock: vi.fn(),
 }))
 
@@ -39,6 +41,7 @@ vi.mock('@/api/enrollments', () => ({
     getEnrollments: getEnrollmentsMock,
     getGuardianStudents: getGuardianStudentsMock,
     getStudentAttendance: getStudentAttendanceMock,
+    getStudentMonthlyAttendance: getStudentMonthlyAttendanceMock,
     getStudentOfferings: getStudentOfferingsMock,
   },
 }))
@@ -168,6 +171,8 @@ function mountView() {
       stubs: {
         ElAlert: AlertStub,
         ElButton: ButtonStub,
+        ElDialog: true,
+        ElDatePicker: true,
         ElOption: OptionStub,
         ElSelect: SelectStub,
         ElTable: true,
@@ -201,6 +206,19 @@ describe('GuardianEnrollmentView student context', () => {
         student(2, '学生 B'),
       ])
     getStudentAttendanceMock.mockReset()
+    getStudentMonthlyAttendanceMock.mockReset().mockResolvedValue({
+      studentId: 1,
+      month: '2026-08',
+      summary: {
+        totalCount: 0,
+        presentCount: 0,
+        lateCount: 0,
+        leaveCount: 0,
+        absentCount: 0,
+        attendanceRate: 0,
+      },
+      records: [],
+    })
     getStudentOfferingsMock.mockReset()
     enrollMock.mockReset().mockResolvedValue({} as Enrollment)
     cancelMock.mockReset().mockResolvedValue(undefined)

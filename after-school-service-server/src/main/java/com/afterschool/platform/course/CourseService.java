@@ -7,15 +7,29 @@ import com.afterschool.platform.academic.ServicePlan;
 import com.afterschool.platform.auth.CurrentUser;
 import com.afterschool.platform.auth.PlatformPrincipal;
 import com.afterschool.platform.common.ApiException;
+import com.afterschool.platform.common.excel.SimpleXlsx;
+import java.io.IOException;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashMap;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 @Service
 public class CourseService {
+
+    private static final List<String> COURSE_XLSX_HEADERS = List.of(
+            "课程编码",
+            "课程名称",
+            "课程类别",
+            "课程说明",
+            "最低年级",
+            "最高年级",
+            "默认容量",
+            "状态");
 
     private final CourseMapper mapper;
     private final AcademicMapper academicMapper;
@@ -35,6 +49,82 @@ public class CourseService {
 
     public List<Map<String, Object>> courses(Long requestedSchoolId) {
         return mapper.listCourses(currentUser.optionalSchoolScope(requestedSchoolId));
+    }
+
+    public byte[] coursesXlsx(Long requestedSchoolId) {
+        List<? extends List<?>> rows = courses(requestedSchoolId).stream()
+                .map(course -> List.of(
+                        value(course, "courseCode"),
+                        value(course, "courseName"),
+                        value(course, "category"),
+                        value(course, "description"),
+                        value(course, "targetGradeMin"),
+                        value(course, "targetGradeMax"),
+                        value(course, "defaultCapacity"),
+                        value(course, "status")))
+                .toList();
+        return SimpleXlsx.write("课程数据", COURSE_XLSX_HEADERS, rows);
+    }
+
+    public byte[] courseImportTemplate() {
+        return SimpleXlsx.write(
+                "课程导入模板",
+                COURSE_XLSX_HEADERS,
+                List.of(List.of(
+                        "C-ART-001",
+                        "创意美术",
+                        "艺术实践",
+                        "示例行，可删除后填写正式数据",
+                        1,
+                        6,
+                        30,
+                        "ACTIVE")));
+    }
+
+    @Transactional
+    public Map<String, Object> importCourses(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw ApiException.badRequest("COURSE_IMPORT_EMPTY", "请选择 Excel 文件");
+        }
+        if (file.getSize() > 5L * 1024 * 1024) {
+            throw ApiException.badRequest(
+                    "COURSE_IMPORT_TOO_LARGE", "课程导入文件不能超过 5 MB");
+        }
+        List<List<String>> sheet;
+        try {
+            sheet = SimpleXlsx.readFirstSheet(file.getBytes());
+        } catch (IOException exception) {
+            throw ApiException.badRequest("INVALID_XLSX", "课程导入文件无法读取");
+        }
+        if (sheet.isEmpty() || !COURSE_XLSX_HEADERS.equals(sheet.getFirst())) {
+            throw ApiException.badRequest(
+                    "COURSE_IMPORT_HEADERS_INVALID",
+                    "课程导入表头必须与系统模板完全一致");
+        }
+        int created = 0;
+        int updated = 0;
+        long schoolId = currentUser.schoolScope(null);
+        for (int index = 1; index < sheet.size(); index++) {
+            List<String> row = sheet.get(index);
+            if (row.stream().allMatch(value -> value == null || value.isBlank())) {
+                continue;
+            }
+            CourseController.CourseRequest request = importRequest(row, index + 1);
+            Map<String, Object> existing = mapper.findCourseByCode(
+                    schoolId, request.courseCode().strip());
+            if (existing == null) {
+                createCourse(request);
+                created++;
+            } else {
+                updateCourse(((Number) existing.get("id")).longValue(), request);
+                updated++;
+            }
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("createdCount", created);
+        result.put("updatedCount", updated);
+        result.put("processedCount", created + updated);
+        return result;
     }
 
     @Transactional
@@ -144,6 +234,9 @@ public class CourseService {
     @Transactional
     public Map<String, Object> updateOffering(long id, CourseController.OfferingRequest request) {
         validateOffering(request);
+        if ("PUBLISHED".equals(request.status())) {
+            requireStandardPlanningReferences(request);
+        }
         long schoolId = currentUser.schoolScope(request.schoolId());
         boolean lifecycleOnly = List.of("CLOSED", "FINISHED", "CANCELED")
                 .contains(request.status());
@@ -311,6 +404,17 @@ public class CourseService {
         return new AcademicReferences(term, plan);
     }
 
+    private void requireStandardPlanningReferences(
+            CourseController.OfferingRequest request) {
+        if (request.termId() == null
+                || request.planId() == null
+                || request.roomId() == null) {
+            throw ApiException.conflict(
+                    "PLANNING_REFERENCES_REQUIRED",
+                    "发布开班前必须关联标准学期、已备案服务计划和启用教室");
+        }
+    }
+
     private RoomResource lockRoom(
             long schoolId,
             CourseController.OfferingRequest request,
@@ -357,6 +461,73 @@ public class CourseService {
         if (request.targetGradeMin() > request.targetGradeMax()) {
             throw ApiException.badRequest("INVALID_GRADE_RANGE", "最低适用年级不能高于最高适用年级");
         }
+    }
+
+    private CourseController.CourseRequest importRequest(
+            List<String> row, int rowNumber) {
+        if (row.size() < COURSE_XLSX_HEADERS.size()) {
+            throw importError(rowNumber, "列数不足");
+        }
+        String code = requiredCell(row, 0, rowNumber, "课程编码");
+        String name = requiredCell(row, 1, rowNumber, "课程名称");
+        String category = requiredCell(row, 2, rowNumber, "课程类别");
+        int gradeMin = positiveInt(row, 4, rowNumber, "最低年级");
+        int gradeMax = positiveInt(row, 5, rowNumber, "最高年级");
+        int capacity = positiveInt(row, 6, rowNumber, "默认容量");
+        String status = requiredCell(row, 7, rowNumber, "状态").toUpperCase();
+        if (!List.of("DRAFT", "ACTIVE", "INACTIVE").contains(status)) {
+            throw importError(rowNumber, "状态只能是 DRAFT、ACTIVE 或 INACTIVE");
+        }
+        if (gradeMin > 12 || gradeMax > 12 || gradeMin > gradeMax) {
+            throw importError(rowNumber, "年级范围必须为 1 至 12 且起始年级不大于结束年级");
+        }
+        return new CourseController.CourseRequest(
+                null,
+                code,
+                name,
+                category,
+                cell(row, 3),
+                gradeMin,
+                gradeMax,
+                capacity,
+                status);
+    }
+
+    private String requiredCell(
+            List<String> row, int index, int rowNumber, String label) {
+        String value = cell(row, index);
+        if (value == null || value.isBlank()) {
+            throw importError(rowNumber, label + "不能为空");
+        }
+        return value.strip();
+    }
+
+    private int positiveInt(
+            List<String> row, int index, int rowNumber, String label) {
+        try {
+            int value = Integer.parseInt(requiredCell(row, index, rowNumber, label));
+            if (value <= 0) {
+                throw new NumberFormatException();
+            }
+            return value;
+        } catch (NumberFormatException exception) {
+            throw importError(rowNumber, label + "必须为正整数");
+        }
+    }
+
+    private String cell(List<String> row, int index) {
+        return index < row.size() ? row.get(index).strip() : "";
+    }
+
+    private ApiException importError(int rowNumber, String message) {
+        return ApiException.badRequest(
+                "COURSE_IMPORT_ROW_INVALID",
+                "第 " + rowNumber + " 行：" + message);
+    }
+
+    private Object value(Map<String, Object> row, String key) {
+        Object value = row.get(key);
+        return value == null ? "" : value;
     }
 
     private void validateOffering(CourseController.OfferingRequest request) {

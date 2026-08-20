@@ -2,6 +2,7 @@ package com.afterschool.platform.report;
 
 import com.afterschool.platform.auth.CurrentUser;
 import com.afterschool.platform.common.ApiException;
+import com.afterschool.platform.common.excel.SimpleXlsx;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
@@ -30,7 +31,9 @@ public class ReportService {
             "attendanceRate",
             "evaluationCount",
             "averageRating",
-            "satisfactionRate");
+            "satisfactionRate",
+            "averageTeacherRating",
+            "teacherSatisfactionRate");
     private static final List<String> PERFORMANCE_HEADERS = List.of(
             "学校",
             "学期",
@@ -45,8 +48,10 @@ public class ReportService {
             "已完成课时",
             "出勤率(%)",
             "评价数",
-            "平均评分",
-            "满意度(%)");
+            "课程平均评分",
+            "课程满意度(%)",
+            "教师平均评分",
+            "教师满意度(%)");
 
     private final ReportMapper mapper;
     private final CurrentUser currentUser;
@@ -131,6 +136,65 @@ public class ReportService {
         return csv.toString().getBytes(StandardCharsets.UTF_8);
     }
 
+    public byte[] coursePerformanceXlsx(
+            Long requestedSchoolId,
+            Long termId,
+            LocalDate fromDate,
+            LocalDate toDate,
+            String category,
+            String status) {
+        List<Map<String, Object>> rows = coursePerformance(
+                requestedSchoolId, termId, fromDate, toDate, category, status);
+        List<? extends List<?>> data = rows.stream()
+                .map(row -> PERFORMANCE_KEYS.stream()
+                        .map(key -> xlsxValue(row.get(key)))
+                        .toList())
+                .toList();
+        return SimpleXlsx.write("课程绩效", PERFORMANCE_HEADERS, data);
+    }
+
+    public List<Map<String, Object>> rectifications(
+            Long requestedSchoolId,
+            LocalDate detectedFrom,
+            LocalDate detectedTo) {
+        if (detectedFrom != null && detectedTo != null
+                && detectedFrom.isAfter(detectedTo)) {
+            throw ApiException.badRequest(
+                    "INVALID_DATE_RANGE", "开始日期不能晚于结束日期");
+        }
+        return mapper.rectificationBreakdown(
+                currentUser.optionalSchoolScope(requestedSchoolId),
+                detectedFrom,
+                detectedTo);
+    }
+
+    public byte[] rectificationsXlsx(
+            Long requestedSchoolId,
+            LocalDate detectedFrom,
+            LocalDate detectedTo) {
+        List<String> headers = List.of(
+                "学校",
+                "预警类型",
+                "违规等级",
+                "整改状态",
+                "事项数",
+                "逾期数",
+                "平均闭环小时");
+        List<? extends List<?>> data = rectifications(
+                        requestedSchoolId, detectedFrom, detectedTo)
+                .stream()
+                .map(row -> List.of(
+                        xlsxValue(row.get("schoolName")),
+                        xlsxValue(row.get("alertType")),
+                        xlsxValue(row.get("severity")),
+                        xlsxValue(row.get("status")),
+                        xlsxValue(row.get("alertCount")),
+                        xlsxValue(row.get("overdueCount")),
+                        xlsxValue(row.get("averageCloseHours"))))
+                .toList();
+        return SimpleXlsx.write("违规整改统计", headers, data);
+    }
+
     private void appendCsvRow(
             StringBuilder target, List<?> cells) {
         for (int index = 0; index < cells.size(); index++) {
@@ -166,5 +230,9 @@ public class ReportService {
 
     private String normalizeOptional(String value) {
         return value == null || value.isBlank() ? null : value.strip();
+    }
+
+    private Object xlsxValue(Object value) {
+        return value == null ? "" : value;
     }
 }

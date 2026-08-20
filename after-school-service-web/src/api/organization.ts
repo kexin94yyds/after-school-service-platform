@@ -2,6 +2,8 @@ import { http } from './http'
 import type {
   Guardian,
   GuardianInput,
+  RegulatorAccount,
+  RegulatorInput,
   School,
   SchoolAdminAccount,
   SchoolAdminInput,
@@ -34,6 +36,22 @@ async function update<T, P>(
 }
 
 export const organizationApi = {
+  async getRegulators(): Promise<RegulatorAccount[]> {
+    const rows = await getAll<RegulatorAccount>('/regulators')
+    return rows.map((row) => ({
+      ...row,
+      schoolIds: Array.isArray(row.schoolIds)
+        ? row.schoolIds
+        : String(row.schoolIds || '')
+            .split(',')
+            .filter(Boolean)
+            .map(Number),
+    }))
+  },
+  createRegulator: (payload: RegulatorInput) =>
+    create<RegulatorAccount, RegulatorInput>('/regulators', payload),
+  updateRegulator: ({ id, ...payload }: RegulatorInput & { id: number }) =>
+    update<RegulatorAccount, RegulatorInput>('/regulators', id, payload),
   getSchools: () => getAll<School>('/schools'),
   createSchool: (payload: SchoolInput) =>
     create<School, SchoolInput>('/schools', payload),

@@ -28,6 +28,36 @@ public interface OrganizationMapper {
 
     int schoolExists(@Param("schoolId") long schoolId);
 
+    int countSchools(@Param("schoolIds") List<Long> schoolIds);
+
+    List<Map<String, Object>> listRegulators();
+
+    Map<String, Object> findRegulator(@Param("id") long id);
+
+    Map<String, Object> findRegulatorByUsername(@Param("username") String username);
+
+    int insertRegulator(
+            @Param("username") String username,
+            @Param("passwordHash") String passwordHash,
+            @Param("displayName") String displayName,
+            @Param("mobile") String mobile,
+            @Param("enabled") boolean enabled);
+
+    int updateRegulator(
+            @Param("id") long id,
+            @Param("username") String username,
+            @Param("displayName") String displayName,
+            @Param("mobile") String mobile,
+            @Param("enabled") boolean enabled,
+            @Param("passwordHash") String passwordHash);
+
+    int deleteRegulatorScopes(@Param("regulatorUserId") long regulatorUserId);
+
+    int insertRegulatorScope(
+            @Param("regulatorUserId") long regulatorUserId,
+            @Param("schoolId") long schoolId,
+            @Param("assignedBy") long assignedBy);
+
     List<Map<String, Object>> listSchoolAdmins(@Param("schoolId") long schoolId);
 
     Map<String, Object> findSchoolAdminByUsername(

@@ -66,6 +66,8 @@
             student_id,
             guardian_id,
             rating,
+            course_rating,
+            teacher_rating,
             comment
         ) VALUES (
             #{schoolId},
@@ -73,7 +75,9 @@
             #{enrollmentId},
             #{studentId},
             #{guardianId},
-            #{rating},
+            #{courseRating},
+            #{courseRating},
+            #{teacherRating},
             #{comment}
         )
     </insert>
@@ -97,6 +101,8 @@
         ce.guardian_id AS guardianId,
         g.full_name AS guardianName,
         ce.rating,
+        ce.course_rating AS courseRating,
+        ce.teacher_rating AS teacherRating,
         ce.comment,
         ce.submitted_at AS submittedAt
     </sql>
@@ -120,6 +126,8 @@
                ce.student_id AS studentId,
                ce.offering_id AS offeringId,
                ce.rating,
+               ce.course_rating AS courseRating,
+               ce.teacher_rating AS teacherRating,
                ce.submitted_at AS submittedAt
         FROM course_evaluation ce
         JOIN student_guardian sg
@@ -166,10 +174,10 @@
                 AND c.category = #{category}
             </if>
             <if test="minRating != null">
-                AND ce.rating >= #{minRating}
+                AND ce.course_rating >= #{minRating}
             </if>
             <if test="maxRating != null">
-                AND ce.rating &lt;= #{maxRating}
+                AND ce.course_rating &lt;= #{maxRating}
             </if>
             <if test="submittedFrom != null">
                 AND ce.submitted_at >= #{submittedFrom}
@@ -183,26 +191,33 @@
 
     <select id="evaluationSummary" resultType="map">
         SELECT COUNT(ce.id) AS evaluationCount,
-               COALESCE(ROUND(AVG(ce.rating), 2), 0) AS averageRating,
+               COALESCE(ROUND(AVG(ce.course_rating), 2), 0) AS averageRating,
+               COALESCE(ROUND(AVG(ce.course_rating), 2), 0) AS averageCourseRating,
+               COALESCE(ROUND(AVG(ce.teacher_rating), 2), 0) AS averageTeacherRating,
                COALESCE(ROUND(
-                   100.0 * SUM(CASE WHEN ce.rating >= 4 THEN 1 ELSE 0 END)
+                   100.0 * SUM(CASE WHEN ce.course_rating >= 4 THEN 1 ELSE 0 END)
                    / NULLIF(COUNT(ce.id), 0),
                    1
                ), 0) AS satisfactionRate,
+               COALESCE(ROUND(
+                   100.0 * SUM(CASE WHEN ce.teacher_rating >= 4 THEN 1 ELSE 0 END)
+                   / NULLIF(COUNT(ce.id), 0),
+                   1
+               ), 0) AS teacherSatisfactionRate,
                COALESCE(SUM(
-                   CASE WHEN ce.rating = 5 THEN 1 ELSE 0 END
+                   CASE WHEN ce.course_rating = 5 THEN 1 ELSE 0 END
                ), 0) AS rating5Count,
                COALESCE(SUM(
-                   CASE WHEN ce.rating = 4 THEN 1 ELSE 0 END
+                   CASE WHEN ce.course_rating = 4 THEN 1 ELSE 0 END
                ), 0) AS rating4Count,
                COALESCE(SUM(
-                   CASE WHEN ce.rating = 3 THEN 1 ELSE 0 END
+                   CASE WHEN ce.course_rating = 3 THEN 1 ELSE 0 END
                ), 0) AS rating3Count,
                COALESCE(SUM(
-                   CASE WHEN ce.rating = 2 THEN 1 ELSE 0 END
+                   CASE WHEN ce.course_rating = 2 THEN 1 ELSE 0 END
                ), 0) AS rating2Count,
                COALESCE(SUM(
-                   CASE WHEN ce.rating = 1 THEN 1 ELSE 0 END
+                   CASE WHEN ce.course_rating = 1 THEN 1 ELSE 0 END
                ), 0) AS rating1Count
         FROM course_evaluation ce
         JOIN course_offering o ON o.id = ce.offering_id

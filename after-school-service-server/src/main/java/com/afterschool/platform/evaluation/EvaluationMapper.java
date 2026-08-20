@@ -31,7 +31,8 @@ public interface EvaluationMapper {
             @Param("enrollmentId") long enrollmentId,
             @Param("studentId") long studentId,
             @Param("guardianId") long guardianId,
-            @Param("rating") int rating,
+            @Param("courseRating") int courseRating,
+            @Param("teacherRating") int teacherRating,
             @Param("comment") String comment);
 
     Map<String, Object> findEvaluation(

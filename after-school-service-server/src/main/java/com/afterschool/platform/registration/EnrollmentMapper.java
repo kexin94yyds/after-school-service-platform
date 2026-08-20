@@ -63,6 +63,8 @@ public interface EnrollmentMapper {
             @Param("id") long id,
             @Param("schoolId") long schoolId);
 
+    EnrollmentRecord findEnrollment(@Param("id") long id);
+
     EnrollmentRecord lockScopedEnrollment(
             @Param("id") long id, @Param("guardianId") long guardianId);
 
@@ -80,4 +82,34 @@ public interface EnrollmentMapper {
     List<Map<String, Object>> listGuardianOfferings(@Param("schoolId") long schoolId);
 
     List<Map<String, Object>> listGuardianAttendance(@Param("studentId") long studentId);
+
+    List<Map<String, Object>> listGuardianAttendanceByRange(
+            @Param("studentId") long studentId,
+            @Param("startDate") java.time.LocalDate startDate,
+            @Param("endDate") java.time.LocalDate endDate);
+
+    Map<String, Object> guardianAttendanceSummary(
+            @Param("studentId") long studentId,
+            @Param("startDate") java.time.LocalDate startDate,
+            @Param("endDate") java.time.LocalDate endDate);
+
+    List<Map<String, Object>> listEnrollmentRoster(
+            @Param("offeringId") long offeringId,
+            @Param("schoolId") Long schoolId);
+
+    int insertEnrollmentAction(
+            @Param("schoolId") long schoolId,
+            @Param("enrollmentId") long enrollmentId,
+            @Param("offeringId") long offeringId,
+            @Param("studentId") long studentId,
+            @Param("guardianId") long guardianId,
+            @Param("actionType") String actionType,
+            @Param("relatedEnrollmentId") Long relatedEnrollmentId,
+            @Param("actorUserId") long actorUserId,
+            @Param("actorRole") String actorRole);
+
+    List<Map<String, Object>> listEnrollmentActions(
+            @Param("enrollmentId") long enrollmentId,
+            @Param("schoolId") Long schoolId,
+            @Param("guardianId") Long guardianId);
 }

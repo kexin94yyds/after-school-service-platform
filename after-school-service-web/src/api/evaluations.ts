@@ -4,7 +4,8 @@ import { compactQuery } from './v7-query'
 export interface EvaluationSubmission {
   studentId: number
   offeringId: number
-  rating: number
+  courseRating: number
+  teacherRating: number
   comment: string | null
 }
 
@@ -22,6 +23,8 @@ export interface CourseEvaluation {
   teacherId: number
   teacherName: string
   rating: number
+  courseRating: number
+  teacherRating: number
   submittedAt: string
   studentId?: number
   studentNo?: string
@@ -44,7 +47,10 @@ export interface EvaluationFilters {
 export interface EvaluationSummary {
   evaluationCount: number
   averageRating: number
+  averageCourseRating: number
+  averageTeacherRating: number
   satisfactionRate: number
+  teacherSatisfactionRate: number
   rating1Count: number
   rating2Count: number
   rating3Count: number
@@ -57,6 +63,8 @@ export interface GuardianOwnEvaluation {
   studentId: number
   offeringId: number
   rating: number
+  courseRating: number
+  teacherRating: number
   submittedAt: string
 }
 
