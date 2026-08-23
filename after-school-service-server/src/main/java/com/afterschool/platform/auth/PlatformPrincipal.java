@@ -15,6 +15,7 @@ public final class PlatformPrincipal implements UserDetails {
     private final String displayName;
     private final boolean enabled;
     private final String roleCode;
+    private final Long studentId;
     private final Long teacherId;
     private final Long guardianId;
 
@@ -26,6 +27,7 @@ public final class PlatformPrincipal implements UserDetails {
         this.displayName = account.getDisplayName();
         this.enabled = account.isEnabled();
         this.roleCode = account.getRoleCode();
+        this.studentId = account.getStudentId();
         this.teacherId = account.getTeacherId();
         this.guardianId = account.getGuardianId();
     }
@@ -48,6 +50,10 @@ public final class PlatformPrincipal implements UserDetails {
 
     public Long teacherId() {
         return teacherId;
+    }
+
+    public Long studentId() {
+        return studentId;
     }
 
     public Long guardianId() {

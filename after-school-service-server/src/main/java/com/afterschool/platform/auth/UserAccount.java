@@ -9,6 +9,7 @@ public class UserAccount {
     private String displayName;
     private boolean enabled;
     private String roleCode;
+    private Long studentId;
     private Long teacherId;
     private Long guardianId;
 
@@ -70,6 +71,14 @@ public class UserAccount {
 
     public Long getTeacherId() {
         return teacherId;
+    }
+
+    public Long getStudentId() {
+        return studentId;
+    }
+
+    public void setStudentId(Long studentId) {
+        this.studentId = studentId;
     }
 
     public void setTeacherId(Long teacherId) {

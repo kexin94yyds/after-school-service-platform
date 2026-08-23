@@ -166,9 +166,10 @@ async function resetFilters(): Promise<void> {
 function roleLabel(role: OperationAuditLog['actorRole']): string {
   const labels: Record<OperationAuditLog['actorRole'], string> = {
     REGULATOR: '监管人员',
-    SCHOOL_ADMIN: '学校管理员',
+    SCHOOL_ADMIN: '教务管理员',
     TEACHER: '教师',
     GUARDIAN: '家长',
+    STUDENT: '学生',
   }
   return labels[role]
 }

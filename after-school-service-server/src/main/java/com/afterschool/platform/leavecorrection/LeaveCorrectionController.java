@@ -35,8 +35,14 @@ public class LeaveCorrectionController {
         return service.guardianLeaveSessions(studentId);
     }
 
+    @GetMapping("/student/sessions")
+    @PreAuthorize("hasRole('STUDENT')")
+    List<Map<String, Object>> studentLeaveSessions() {
+        return service.studentLeaveSessions();
+    }
+
     @GetMapping("/leave-requests")
-    @PreAuthorize("hasAnyRole('REGULATOR','SCHOOL_ADMIN','TEACHER','GUARDIAN')")
+    @PreAuthorize("hasAnyRole('REGULATOR','SCHOOL_ADMIN','TEACHER','GUARDIAN','STUDENT')")
     List<Map<String, Object>> leaveRequests(
             @RequestParam(required = false) Long schoolId,
             @RequestParam(required = false) Long offeringId,
@@ -46,19 +52,19 @@ public class LeaveCorrectionController {
     }
 
     @PostMapping("/leave-requests")
-    @PreAuthorize("hasRole('GUARDIAN')")
+    @PreAuthorize("hasRole('STUDENT')")
     Map<String, Object> submitLeave(@Valid @RequestBody LeaveSubmission request) {
         return service.submitLeave(request);
     }
 
     @PostMapping("/leave-requests/{id}/withdraw")
-    @PreAuthorize("hasRole('GUARDIAN')")
+    @PreAuthorize("hasRole('STUDENT')")
     Map<String, Object> withdrawLeave(@PathVariable long id) {
         return service.withdrawLeave(id);
     }
 
     @PutMapping("/leave-requests/{id}/review")
-    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','TEACHER')")
+    @PreAuthorize("hasRole('TEACHER')")
     Map<String, Object> reviewLeave(
             @PathVariable long id, @Valid @RequestBody LeaveReview request) {
         return service.reviewLeave(id, request);
@@ -94,7 +100,7 @@ public class LeaveCorrectionController {
     }
 
     @GetMapping("/attendance/{attendanceId}/revisions")
-    @PreAuthorize("hasAnyRole('REGULATOR','SCHOOL_ADMIN','TEACHER','GUARDIAN')")
+    @PreAuthorize("hasAnyRole('REGULATOR','SCHOOL_ADMIN','TEACHER','GUARDIAN','STUDENT')")
     List<Map<String, Object>> revisions(@PathVariable long attendanceId) {
         return service.revisions(attendanceId);
     }

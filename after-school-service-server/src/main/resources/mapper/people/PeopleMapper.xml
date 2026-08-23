@@ -89,6 +89,8 @@
     <sql id="studentColumns">
         st.id,
         st.school_id AS schoolId,
+        st.user_id AS userId,
+        u.username,
         s.school_name AS schoolName,
         st.class_id AS classId,
         c.class_name AS className,
@@ -106,6 +108,7 @@
         FROM student st
         JOIN school s ON s.id = st.school_id
         JOIN school_class c ON c.id = st.class_id
+        LEFT JOIN sys_user u ON u.id = st.user_id
         <if test="schoolId != null">WHERE st.school_id = #{schoolId}</if>
         ORDER BY c.grade, c.class_name, st.student_no
     </select>
@@ -115,6 +118,7 @@
         FROM student st
         JOIN school s ON s.id = st.school_id
         JOIN school_class c ON c.id = st.class_id
+        LEFT JOIN sys_user u ON u.id = st.user_id
         WHERE st.school_id = #{schoolId}
           AND st.student_no = #{studentNo}
     </select>
@@ -129,9 +133,9 @@
 
     <insert id="insertStudent">
         INSERT INTO student (
-            school_id, class_id, student_no, full_name, gender, date_of_birth, status
+            school_id, user_id, class_id, student_no, full_name, gender, date_of_birth, status
         ) VALUES (
-            #{schoolId}, #{classId}, #{studentNo}, #{fullName}, #{gender}, #{dateOfBirth}, #{status}
+            #{schoolId}, #{userId}, #{classId}, #{studentNo}, #{fullName}, #{gender}, #{dateOfBirth}, #{status}
         )
     </insert>
 
@@ -145,6 +149,21 @@
             status = #{status}
         WHERE id = #{id}
           AND school_id = #{schoolId}
+    </update>
+
+    <select id="studentUserId" resultType="long">
+        SELECT user_id
+        FROM student
+        WHERE id = #{id}
+          AND school_id = #{schoolId}
+    </select>
+
+    <update id="attachStudentUser">
+        UPDATE student
+        SET user_id = #{userId}
+        WHERE id = #{id}
+          AND school_id = #{schoolId}
+          AND user_id IS NULL
     </update>
 
     <sql id="guardianColumns">

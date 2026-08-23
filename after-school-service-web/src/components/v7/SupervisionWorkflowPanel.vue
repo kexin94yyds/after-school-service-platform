@@ -537,7 +537,7 @@ function scanOperatorLabel(run: SupervisionScanRun): string {
 function actorRoleLabel(role: SupervisionAction['actorRole']): string {
   const labels: Record<SupervisionAction['actorRole'], string> = {
     REGULATOR: '监管人员',
-    SCHOOL_ADMIN: '学校管理员',
+    SCHOOL_ADMIN: '教务管理员',
     SYSTEM: '系统任务',
   }
   return labels[role]

@@ -41,15 +41,16 @@ class AcademicMapperXmlTest {
         BoundSql termSql = configuration
                 .getMappedStatement(AcademicMapper.class.getName()
                         + ".lockTermOfferings")
-                .getBoundSql(Map.of("termId", 1L));
+                .getBoundSql(Map.of("termId", 1L, "schoolId", 9L));
         assertThat(normalize(termSql))
                 .contains("FROM course_offering")
                 .contains("term_id = ?")
+                .contains("school_id = ?")
                 .contains("ORDER BY id")
                 .endsWith("FOR UPDATE");
         assertThat(termSql.getParameterMappings())
                 .extracting(mapping -> mapping.getProperty())
-                .containsExactly("termId");
+                .containsExactly("termId", "schoolId");
 
         BoundSql planSql = configuration
                 .getMappedStatement(AcademicMapper.class.getName()

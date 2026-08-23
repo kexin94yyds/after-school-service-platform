@@ -49,9 +49,9 @@ class LeaveCorrectionServiceTest {
     }
 
     @Test
-    void guardianCanSubmitForBoundEffectivelyEnrolledStudentBeforeClass() {
-        PlatformPrincipal guardian = principal(3, "GUARDIAN", 1L, null, 30L);
-        when(currentUser.principal()).thenReturn(guardian);
+    void studentCanSubmitForOwnEffectivelyEnrolledFutureSession() {
+        PlatformPrincipal student = principal(3, "STUDENT", 1L, null, null);
+        when(currentUser.principal()).thenReturn(student);
         stubSessionLocks(futureSession());
         when(mapper.lockGuardianEligibleEnrollment(
                         1,
@@ -71,9 +71,8 @@ class LeaveCorrectionServiceTest {
         verify(mapper).insertLeave(record.capture(), eq("发烧就医"), eq(3L));
         assertThat(record.getValue().getSchoolId()).isEqualTo(1);
         assertThat(record.getValue().getOfferingId()).isEqualTo(10);
-        assertThat(record.getValue().getGuardianId()).isEqualTo(30);
+        assertThat(record.getValue().getGuardianId()).isNull();
         InOrder locks = inOrder(mapper);
-        locks.verify(mapper).lockGuardianStudentBinding(1, 40, 30);
         locks.verify(mapper).lockOfferingContext(10);
         locks.verify(mapper).lockSessionContext(30);
         locks.verify(mapper)
@@ -101,9 +100,9 @@ class LeaveCorrectionServiceTest {
     }
 
     @Test
-    void guardianCannotSubmitForUnboundOrIneffectiveStudent() {
+    void studentCannotSubmitForIneffectiveEnrollment() {
         when(currentUser.principal())
-                .thenReturn(principal(3, "GUARDIAN", 1L, null, 30L));
+                .thenReturn(principal(3, "STUDENT", 1L, null, null));
         stubSessionLocks(futureSession());
         when(mapper.lockGuardianEligibleEnrollment(
                         1,
@@ -124,7 +123,7 @@ class LeaveCorrectionServiceTest {
     @Test
     void canceledEnrollmentCannotCreateLeaveAfterInitialSessionSnapshot() {
         when(currentUser.principal())
-                .thenReturn(principal(3, "GUARDIAN", 1L, null, 30L));
+                .thenReturn(principal(3, "STUDENT", 1L, null, null));
         stubSessionLocks(futureSession());
         when(mapper.lockGuardianEligibleEnrollment(
                         1,
@@ -141,7 +140,6 @@ class LeaveCorrectionServiceTest {
 
         InOrder currentRead = inOrder(mapper);
         currentRead.verify(mapper).findSessionContext(30);
-        currentRead.verify(mapper).lockGuardianStudentBinding(1, 40, 30);
         currentRead.verify(mapper).lockOfferingContext(10);
         currentRead.verify(mapper).lockSessionContext(30);
         currentRead.verify(mapper)
@@ -159,7 +157,7 @@ class LeaveCorrectionServiceTest {
         started.setSessionDate(LocalDate.of(2026, 9, 1));
         started.setStartTime(LocalTime.of(18, 0));
         when(currentUser.principal())
-                .thenReturn(principal(3, "GUARDIAN", 1L, null, 30L));
+                .thenReturn(principal(3, "STUDENT", 1L, null, null));
         stubSessionLocks(started);
 
         assertCode(
@@ -222,7 +220,6 @@ class LeaveCorrectionServiceTest {
         assertThat(result.get("status")).isEqualTo("APPROVED");
         verify(mapper).reviewLeave(50, "APPROVED", "材料已核验", 2);
         InOrder locks = inOrder(mapper);
-        locks.verify(mapper).lockGuardianStudentBinding(1, 40, 30);
         locks.verify(mapper).lockOfferingContext(10);
         locks.verify(mapper).lockSessionContext(30);
         locks.verify(mapper)
@@ -430,7 +427,7 @@ class LeaveCorrectionServiceTest {
         LeaveRequestRecord value = new LeaveRequestRecord();
         value.setId(50);
         value.setStudentId(40);
-        value.setGuardianId(30);
+        value.setGuardianId(null);
         value.setSubmittedBy(3);
         value.setStatus(status);
         setContext(
@@ -499,6 +496,9 @@ class LeaveCorrectionServiceTest {
         account.setSchoolId(schoolId);
         account.setTeacherId(teacherId);
         account.setGuardianId(guardianId);
+        if ("STUDENT".equals(role)) {
+            account.setStudentId(40L);
+        }
         return new PlatformPrincipal(account);
     }
 

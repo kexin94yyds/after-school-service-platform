@@ -5,13 +5,15 @@ const demoPassword = process.env.E2E_DEMO_PASSWORD ?? '123456'
 async function signIn(
   page: Page,
   username: string,
+  loginPath: string,
   expectedPath: RegExp,
 ): Promise<void> {
-  await page.goto('/login')
+  await page.goto(loginPath)
   await page.getByPlaceholder('请输入登录账号').fill(username)
   await page.getByPlaceholder('请输入登录密码').fill(demoPassword)
   await page.getByRole('button', { name: '登录' }).click()
   await expect(page).toHaveURL(expectedPath)
+  await expect(page.getByRole('button', { name: '退出登录' })).toBeVisible()
 }
 
 async function signOut(page: Page): Promise<void> {
@@ -25,61 +27,64 @@ test('登录页按回车只发送一次认证请求', async ({ page }) => {
     if (request.url().includes('/api/auth/login')) loginRequests += 1
   })
 
-  await page.goto('/login')
-  await page.getByPlaceholder('请输入登录账号').fill('admin')
+  await page.goto('/login/student')
+  await page.getByPlaceholder('请输入登录账号').fill('student_chen_shu')
   const password = page.getByPlaceholder('请输入登录密码')
   await password.fill(demoPassword)
   await password.press('Enter')
 
-  await expect(page).toHaveURL(/\/regulator$/)
+  await expect(page).toHaveURL(/\/student$/)
   expect(loginRequests).toBe(1)
 })
 
-test('四角色核心页面与越权路由按服务端角色工作', async ({ page }) => {
-  await signIn(page, 'admin', /\/regulator$/)
-  await expect(page.getByRole('heading', { name: '课后服务运行总览' })).toBeVisible()
-  await page.goto('/regulator/academic')
-  await expect(page.getByRole('heading', { name: '学期与服务计划备案' })).toBeVisible()
-  await page.goto('/regulator/supervision')
-  await expect(page.getByRole('heading', { name: '课后服务预警与复核' })).toBeVisible()
-  await page.getByRole('button', { name: '扫描记录' }).click()
-  await expect(page.getByText('监管扫描运行记录')).toBeVisible()
-  await expect(page.getByText('手工扫描').first()).toBeVisible()
-  await page.keyboard.press('Escape')
-  await expect(page.getByText('监管扫描运行记录')).toBeHidden()
+test('四角色独立入口与越权路由按服务端角色工作', async ({ page }) => {
+  await signIn(page, 'student_chen_shu', '/login/student', /\/student$/)
+  await expect(page.getByRole('heading', { name: '我的课后服务' })).toBeVisible()
+  await page.goto('/student/enrollments')
+  await expect(page.getByRole('heading', { name: '选择我的课后课程' })).toBeVisible()
+  await page.goto('/teacher')
+  await expect(page).toHaveURL(/\/student$/)
   await signOut(page)
 
-  await signIn(page, 'school_admin', /\/school$/)
+  await signIn(page, 'school_admin', '/login/admin', /\/school$/)
   await expect(page.getByRole('heading', { name: '学校课后服务工作台' })).toBeVisible()
   await page.goto('/school/courses')
   await expect(page.getByRole('heading', { name: '课程与开班' })).toBeVisible()
   await page.goto('/school/leave-corrections')
   await expect(page.getByRole('heading', { name: '请假与考勤纠错审批' })).toBeVisible()
+  await expect(page.getByText('请假由任课教师审核；教务端仅查看过程与结果。')).toBeVisible()
+  await page.goto('/school/grades')
+  await expect(page.getByRole('heading', { name: '成绩与学习评价统计' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '课程、教师评分与意见' })).toBeVisible()
+  await page.goto('/school/teaching')
+  await expect(page).toHaveURL(/\/school$/)
+  await page.goto('/regulator')
+  await expect(page).toHaveURL(/\/school$/)
   await signOut(page)
 
-  await signIn(page, 'teacher_wang', /\/teacher$/)
+  await signIn(page, 'teacher_wang', '/login/teacher', /\/teacher$/)
   await expect(page.getByRole('heading', { name: '课程与考勤工作台' })).toBeVisible()
   await page.goto('/teacher/sessions')
   await expect(page.getByRole('heading', { name: '课次与学生考勤' })).toBeVisible()
   await page.goto('/teacher/leave-corrections')
   await expect(page.getByRole('heading', { name: '请假审核与考勤纠错' })).toBeVisible()
+  await page.goto('/teacher/grades')
+  await expect(page.getByRole('heading', { name: '学生成绩录入' })).toBeVisible()
   await signOut(page)
 
-  await signIn(page, 'parent_chen', /\/parent$/)
-  await page.goto('/parent/enrollments')
-  await expect(page.getByRole('heading', { name: '为学生选择课后课程' })).toBeVisible()
-  await page.goto('/parent/leaves')
-  await expect(page.getByRole('heading', { name: '请假从一节课次开始' })).toBeVisible()
+  await signIn(page, 'parent_chen', '/login/parent', /\/parent$/)
+  await page.goto('/parent/children')
+  await expect(page.getByRole('heading', { name: '子女课表、考勤与成绩' })).toBeVisible()
   await page.goto('/parent/evaluations')
   await expect(page.getByRole('heading', { name: '课后课程评价' })).toBeVisible()
 
-  await page.goto('/regulator')
+  await page.goto('/student')
   await expect(page).toHaveURL(/\/parent$/)
-  await expect(page.getByRole('heading', { name: '学生选课与报名记录' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '子女课后服务概览' })).toBeVisible()
 })
 
 test('长表单取消时保留编辑或显式放弃', async ({ page }) => {
-  await signIn(page, 'school_admin', /\/school$/)
+  await signIn(page, 'school_admin', '/login/admin', /\/school$/)
   await page.goto('/school/academic')
   await expect(page.getByRole('heading', { name: '学期资源与服务计划' })).toBeVisible()
   await page.getByRole('button', { name: '新增计划' }).click()
@@ -99,7 +104,7 @@ test('长表单取消时保留编辑或显式放弃', async ({ page }) => {
 })
 
 test('工作台单个接口失败时仍呈现其他模块', async ({ page }) => {
-  await signIn(page, 'school_admin', /\/school$/)
+  await signIn(page, 'school_admin', '/login/admin', /\/school$/)
   await page.route('**/api/service-plans**', (route) => route.abort('failed'))
   await page.getByRole('button', { name: '刷新数据' }).click()
 
@@ -109,7 +114,7 @@ test('工作台单个接口失败时仍呈现其他模块', async ({ page }) => 
 })
 
 test('较慢的旧审批请求不会覆盖最新筛选结果', async ({ page }) => {
-  await signIn(page, 'school_admin', /\/school$/)
+  await signIn(page, 'school_admin', '/login/admin', /\/school$/)
   await page.goto('/school/leave-corrections')
   await expect(page.getByRole('heading', { name: '请假与考勤纠错审批' })).toBeVisible()
 

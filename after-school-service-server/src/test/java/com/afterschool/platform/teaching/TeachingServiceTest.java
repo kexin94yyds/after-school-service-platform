@@ -232,18 +232,19 @@ class TeachingServiceTest {
     }
 
     @Test
-    void cannotCompleteSessionWithoutAttendance() {
+    void updatesTeachingNotesWithoutChangingSessionStatus() {
         when(mapper.lockLessonOwner(30)).thenReturn(lesson(
                 30, 1, 10, LocalDate.of(2026, 9, 1), LocalTime.of(16, 30), "SCHEDULED"));
         when(mapper.findLessonOfferingId(30)).thenReturn(10L);
         when(mapper.lockOfferingAccess(10)).thenReturn(offeringAccess(20, "PUBLISHED"));
         when(currentUser.principal()).thenReturn(principal("TEACHER", 1L, 20L));
 
-        assertCode(
-                "INVALID_SESSION_TRANSITION",
-                () -> service.updateSession(
-                        30,
-                        new TeachingController.SessionRequest("COMPLETED", null)));
+        when(mapper.updateSession(30, "SCHEDULED", "课堂记录")).thenReturn(1);
+        when(mapper.listSessions(10)).thenReturn(List.of(Map.of("id", 30L)));
+
+        service.updateSession(30, new TeachingController.SessionRequest("课堂记录"));
+
+        verify(mapper).updateSession(30, "SCHEDULED", "课堂记录");
     }
 
     @Test

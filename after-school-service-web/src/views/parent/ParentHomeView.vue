@@ -57,7 +57,7 @@ const tasks = computed<DashboardTask[]>(() => [
     description: '已提交、可继续查看或在上课前撤回的请假。',
     value: leaveRequests.value.filter((item) => item.status === 'PENDING')
       .length,
-    to: '/parent/leaves?leaveStatus=PENDING',
+    to: '/parent/children',
     tone: 'warning',
   },
   {
@@ -65,7 +65,7 @@ const tasks = computed<DashboardTask[]>(() => [
     description: '已通过审核、将预标记为请假的课次。',
     value: leaveRequests.value.filter((item) => item.status === 'APPROVED')
       .length,
-    to: '/parent/leaves?leaveStatus=APPROVED',
+    to: '/parent/children',
   },
   {
     title: '未来可请假课次',
@@ -74,22 +74,16 @@ const tasks = computed<DashboardTask[]>(() => [
       (item) =>
         item.status === 'SCHEDULED' && item.activeLeaveRequestId === null,
     ).length,
-    to: '/parent/leaves',
+    to: '/parent/children',
   },
 ])
 
 const shortcuts = [
   {
-    title: '学生选课',
-    description: '选择已绑定学生，查看符合条件且仍可报名的开班。',
-    to: '/parent/enrollments',
-    action: '开始选课',
-  },
-  {
-    title: '课次请假',
-    description: '为已绑定学生查看未来课次，提交或撤回请假。',
-    to: '/parent/leaves',
-    action: '管理请假',
+    title: '子女教务信息',
+    description: '查看已绑定子女的课表、请假、考勤和成绩。',
+    to: '/parent/children',
+    action: '查看记录',
   },
   {
     title: '课后课程评价',
@@ -183,8 +177,8 @@ onMounted(load)
 <template>
   <RoleDashboard
     kicker="家长服务"
-    title="学生选课与报名记录"
-    description="为已建立监护关系的学生查看合适开班，并持续确认报名结果。"
+    title="子女课后服务概览"
+    description="查看已绑定子女的教务进度，并在课程结束后提供课程与教师评价。"
     :metrics="metrics"
     :tasks="tasks"
     :shortcuts="shortcuts"

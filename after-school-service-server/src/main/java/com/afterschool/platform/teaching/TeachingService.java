@@ -73,14 +73,7 @@ public class TeachingService {
     public Map<String, Object> updateSession(
             long sessionId, TeachingController.SessionRequest request) {
         LessonOwner lesson = requireLessonAccess(sessionId, true);
-        validateSessionTransition(lesson.getStatus(), request.status());
-        if ("CANCELED".equals(request.status())
-                && mapper.countSessionAttendance(sessionId) > 0) {
-            throw ApiException.conflict(
-                    "SESSION_HAS_ATTENDANCE",
-                    "已有考勤记录的课次不能取消");
-        }
-        if (mapper.updateSession(sessionId, request.status(), trimToNull(request.notes())) != 1) {
+        if (mapper.updateSession(sessionId, lesson.getStatus(), trimToNull(request.notes())) != 1) {
             throw ApiException.notFound("课次不存在");
         }
         return mapper.listSessions(lesson.getOfferingId()).stream()
@@ -225,20 +218,6 @@ public class TeachingService {
             default -> throw ApiException.forbidden("当前角色不能访问考勤");
         }
         return lesson;
-    }
-
-    private void validateSessionTransition(String current, String target) {
-        boolean allowed = switch (current) {
-            case "SCHEDULED" -> "SCHEDULED".equals(target) || "CANCELED".equals(target);
-            case "COMPLETED" -> "COMPLETED".equals(target);
-            case "CANCELED" -> "CANCELED".equals(target);
-            default -> false;
-        };
-        if (!allowed) {
-            throw ApiException.conflict(
-                    "INVALID_SESSION_TRANSITION",
-                    "课次状态不能从 " + current + " 变更为 " + target);
-        }
     }
 
     private String trimToNull(String value) {

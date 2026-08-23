@@ -6,7 +6,8 @@ import { computed, onMounted, ref } from 'vue'
 
 import { enrollmentApi } from '@/api/enrollments'
 import { getErrorMessage } from '@/api/http'
-import type { Enrollment, EnrollmentAction, EnrollmentStatus } from '@/api/types'
+import { organizationApi } from '@/api/organization'
+import type { Enrollment, EnrollmentAction, EnrollmentStatus, SchoolClass } from '@/api/types'
 import PageHeader from '@/components/PageHeader.vue'
 import {
   formatDateTime,
@@ -21,6 +22,8 @@ const statusFilter = ref<EnrollmentStatus | ''>('')
 const keyword = ref('')
 const cancelingEnrollmentId = ref<number | null>(null)
 const rosterOfferingId = ref<number | null>(null)
+const classes = ref<SchoolClass[]>([])
+const rosterClassId = ref<number | null>(null)
 const actions = ref<EnrollmentAction[]>([])
 const actionDialogVisible = ref(false)
 const actionLoading = ref(false)
@@ -59,7 +62,11 @@ async function load(): Promise<void> {
   loading.value = true
   error.value = ''
   try {
-    enrollments.value = await enrollmentApi.getEnrollments()
+    const [enrollmentRows, classRows] = await Promise.all([
+      enrollmentApi.getEnrollments(), organizationApi.getClasses(),
+    ])
+    enrollments.value = enrollmentRows
+    classes.value = classRows
   } catch (loadError) {
     error.value = getErrorMessage(loadError, '报名列表加载失败。')
   } finally {
@@ -125,7 +132,7 @@ onMounted(load)
     <PageHeader
       kicker="报名结果"
       title="报名管理"
-      description="查看本校报名学生、监护人、报名状态和取消操作记录。"
+      description="查看本校学生报名状态、课程归属和取消操作记录。"
     >
       <template #actions>
         <el-button :loading="loading" @click="load">刷新</el-button>
@@ -171,6 +178,12 @@ onMounted(load)
           @click="rosterOfferingId && enrollmentApi.downloadRoster(rosterOfferingId)"
         >
           导出选课名单 Excel
+        </el-button>
+        <el-select v-model="rosterClassId" clearable filterable placeholder="选择行政班导出">
+          <el-option v-for="item in classes" :key="item.id" :label="item.className" :value="item.id" />
+        </el-select>
+        <el-button :disabled="rosterClassId === null" @click="rosterClassId && enrollmentApi.downloadClassRoster(rosterClassId)">
+          导出班级名单 Excel
         </el-button>
       </div>
       <el-table

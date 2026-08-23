@@ -13,6 +13,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -103,6 +104,35 @@ class AuthControllerTest {
                 .isInstanceOf(ApiException.class)
                 .extracting(exception -> ((ApiException) exception).code())
                 .isEqualTo("CURRENT_PASSWORD_INVALID");
+    }
+
+    @Test
+    void rejectsValidCredentialsAtTheWrongRolePortal() {
+        AuthenticationManager manager = mock(AuthenticationManager.class);
+        PlatformPrincipal principal = currentPrincipal();
+        when(manager.authenticate(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(UsernamePasswordAuthenticationToken.authenticated(
+                        principal,
+                        principal.getPassword(),
+                        principal.getAuthorities()));
+        AuthController roleController = new AuthController(
+                manager,
+                mapper,
+                passwordEncoder,
+                mock(LoginAttemptGuard.class));
+        MockHttpServletRequest request = new MockHttpServletRequest();
+
+        assertThatThrownBy(() -> roleController.login(
+                        new AuthController.LoginRequest(
+                                "operator", "CurrentPassword@2026", "STUDENT"),
+                        request,
+                        new MockHttpServletResponse()))
+                .isInstanceOf(ApiException.class)
+                .extracting(exception -> ((ApiException) exception).code())
+                .isEqualTo("ROLE_LOGIN_MISMATCH");
+
+        assertThat(request.getSession(false)).isNull();
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
     }
 
     private void authenticate(String password) {

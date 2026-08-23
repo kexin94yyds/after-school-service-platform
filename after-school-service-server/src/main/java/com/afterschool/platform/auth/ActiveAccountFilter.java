@@ -36,6 +36,7 @@ public class ActiveAccountFilter extends OncePerRequestFilter {
                     && Objects.equals(current.getPasswordHash(), principal.getPassword())
                     && Objects.equals(current.getSchoolId(), principal.schoolId())
                     && Objects.equals(current.getRoleCode(), principal.roleCode())
+                    && Objects.equals(current.getStudentId(), principal.studentId())
                     && Objects.equals(current.getTeacherId(), principal.teacherId())
                     && Objects.equals(current.getGuardianId(), principal.guardianId());
             if (unchanged) {

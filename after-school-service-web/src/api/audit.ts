@@ -8,7 +8,7 @@ export interface OperationAuditLog {
   actorUserId: number
   actorUsername: string
   actorName: string
-  actorRole: 'REGULATOR' | 'SCHOOL_ADMIN' | 'TEACHER' | 'GUARDIAN'
+  actorRole: 'REGULATOR' | 'SCHOOL_ADMIN' | 'TEACHER' | 'GUARDIAN' | 'STUDENT'
   actorSchoolId?: number | null
   actorSchoolName?: string | null
   targetSchoolId?: number | null

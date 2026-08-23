@@ -42,6 +42,7 @@ class AcademicServiceTest {
         principal = mock(PlatformPrincipal.class);
         when(principal.id()).thenReturn(8L);
         when(currentUser.principal()).thenReturn(principal);
+        when(currentUser.schoolScope(null)).thenReturn(1L);
         service = new AcademicService(
                 mapper,
                 currentUser,
@@ -58,19 +59,36 @@ class AcademicServiceTest {
                 LocalDate.of(2026, 9, 1),
                 LocalDate.of(2027, 1, 31),
                 "DRAFT");
-        when(mapper.findTermByCode("2026-FALL"))
+        when(mapper.findTermByCode(1, "2026-FALL"))
                 .thenReturn(Map.of("id", 1L, "status", "DRAFT"));
 
         Map<String, Object> created = service.createTerm(request);
 
         assertThat(created).containsEntry("status", "DRAFT");
         verify(mapper).insertTerm(
+                1,
                 "2026-FALL",
                 "2026 秋季学期",
                 request.startDate(),
                 request.endDate(),
                 "DRAFT",
                 8L);
+    }
+
+    @Test
+    void termQueriesAndUpdatesStayInsideTheAuthenticatedSchool() {
+        when(mapper.listTerms(1)).thenReturn(List.of(Map.of("id", 2L, "schoolId", 1L)));
+
+        assertThat(service.terms()).containsExactly(Map.of("id", 2L, "schoolId", 1L));
+
+        AcademicController.TermRequest foreignUpdate = new AcademicController.TermRequest(
+                "FOREIGN-TERM",
+                "其他学校学期",
+                LocalDate.of(2026, 9, 1),
+                LocalDate.of(2027, 1, 31),
+                "DRAFT");
+        assertCode("NOT_FOUND", () -> service.updateTerm(99, foreignUpdate));
+        verify(mapper).lockTerm(99, 1);
     }
 
     @Test
@@ -85,6 +103,7 @@ class AcademicServiceTest {
         assertCode("INITIAL_TERM_STATUS_INVALID", () -> service.createTerm(request));
 
         verify(mapper, never()).insertTerm(
+                1,
                 "2026-FALL",
                 "2026 秋季学期",
                 request.startDate(),
@@ -96,7 +115,7 @@ class AcademicServiceTest {
     @Test
     void rejectsSkippedTermTransition() {
         AcademicTerm term = term("DRAFT");
-        when(mapper.lockTerm(1)).thenReturn(term);
+        when(mapper.lockTerm(1, 1)).thenReturn(term);
 
         AcademicController.TermRequest request = new AcademicController.TermRequest(
                 "2026-FALL",
@@ -110,6 +129,7 @@ class AcademicServiceTest {
                 () -> service.updateTerm(1, request));
 
         verify(mapper, never()).updateTerm(
+                1,
                 1,
                 "2026-FALL",
                 "2026 秋季学期",
@@ -127,8 +147,9 @@ class AcademicServiceTest {
                 LocalDate.of(2026, 9, 1),
                 LocalDate.of(2027, 1, 31),
                 "CLOSED");
-        when(mapper.lockTerm(1)).thenReturn(term);
+        when(mapper.lockTerm(1, 1)).thenReturn(term);
         when(mapper.updateTerm(
+                        1,
                         1,
                         "2026-FALL",
                         "2026 秋季学期",
@@ -136,15 +157,16 @@ class AcademicServiceTest {
                         request.endDate(),
                         "CLOSED"))
                 .thenReturn(1);
-        when(mapper.findTermByCode("2026-FALL"))
+        when(mapper.findTermByCode(1, "2026-FALL"))
                 .thenReturn(Map.of("id", 1L, "status", "CLOSED"));
 
         service.updateTerm(1, request);
 
         InOrder writes = inOrder(mapper);
-        writes.verify(mapper).lockTerm(1);
-        writes.verify(mapper).lockTermOfferings(1);
+        writes.verify(mapper).lockTerm(1, 1);
+        writes.verify(mapper).lockTermOfferings(1, 1);
         writes.verify(mapper).updateTerm(
+                1,
                 1,
                 "2026-FALL",
                 "2026 秋季学期",
@@ -162,8 +184,9 @@ class AcademicServiceTest {
                 LocalDate.of(2026, 9, 1),
                 LocalDate.of(2027, 1, 31),
                 "CLOSED");
-        when(mapper.lockTerm(1)).thenReturn(term);
+        when(mapper.lockTerm(1, 1)).thenReturn(term);
         when(mapper.updateTerm(
+                        1,
                         1,
                         "2026-FALL",
                         "2026 秋季学期",
@@ -171,12 +194,12 @@ class AcademicServiceTest {
                         request.endDate(),
                         "CLOSED"))
                 .thenReturn(1);
-        when(mapper.findTermByCode("2026-FALL"))
+        when(mapper.findTermByCode(1, "2026-FALL"))
                 .thenReturn(Map.of("id", 1L, "status", "CLOSED"));
 
         service.updateTerm(1, request);
 
-        verify(mapper, never()).lockTermOfferings(1);
+        verify(mapper, never()).lockTermOfferings(1, 1);
     }
 
     @Test
@@ -184,7 +207,7 @@ class AcademicServiceTest {
         ServicePlan plan = plan("RETURNED");
         when(mapper.findServicePlan(10)).thenReturn(plan);
         when(currentUser.schoolScope(1L)).thenReturn(1L);
-        when(mapper.lockTerm(1)).thenReturn(term("ACTIVE"));
+        when(mapper.lockTerm(1, 1)).thenReturn(term("ACTIVE"));
         when(mapper.lockServicePlan(10, 1)).thenReturn(plan);
         when(mapper.countPlanItems(10)).thenReturn(1);
         when(principal.roleCode()).thenReturn("SCHOOL_ADMIN");
@@ -217,7 +240,7 @@ class AcademicServiceTest {
         ServicePlan plan = plan("DRAFT");
         when(mapper.findServicePlan(10)).thenReturn(plan);
         when(currentUser.schoolScope(1L)).thenReturn(1L);
-        when(mapper.lockTerm(1)).thenReturn(term("ACTIVE"));
+        when(mapper.lockTerm(1, 1)).thenReturn(term("ACTIVE"));
         when(mapper.lockServicePlan(10, 1)).thenReturn(plan);
         when(principal.roleCode()).thenReturn("SCHOOL_ADMIN");
 
@@ -233,19 +256,26 @@ class AcademicServiceTest {
     }
 
     @Test
-    void schoolCannotFileItsOwnPlan() {
+    void academicAdministratorCanFileItsOwnPlan() {
         ServicePlan plan = plan("SUBMITTED");
         when(mapper.findServicePlan(10)).thenReturn(plan);
         when(currentUser.schoolScope(1L)).thenReturn(1L);
-        when(mapper.lockTerm(1)).thenReturn(term("ACTIVE"));
+        when(mapper.lockTerm(1, 1)).thenReturn(term("ACTIVE"));
         when(mapper.lockServicePlan(10, 1)).thenReturn(plan);
         when(principal.roleCode()).thenReturn("SCHOOL_ADMIN");
+        when(mapper.transitionServicePlan(
+                        10, 1, "SUBMITTED", "FILED", null, 8, NOW))
+                .thenReturn(1);
+        when(mapper.findServicePlanByCode(1, plan.getPlanCode()))
+                .thenReturn(Map.of("status", "FILED"));
 
-        assertCode(
-                "INVALID_PLAN_TRANSITION",
-                () -> service.transitionServicePlan(
-                        10,
-                        new AcademicController.PlanTransitionRequest("FILED", null)));
+        Map<String, Object> result = service.transitionServicePlan(
+                10,
+                new AcademicController.PlanTransitionRequest("FILED", null));
+
+        assertThat(result).containsEntry("status", "FILED");
+        verify(mapper).transitionServicePlan(
+                10, 1, "SUBMITTED", "FILED", null, 8, NOW);
     }
 
     @Test
@@ -253,7 +283,7 @@ class AcademicServiceTest {
         ServicePlan plan = plan("SUBMITTED");
         when(mapper.findServicePlan(10)).thenReturn(plan);
         when(currentUser.schoolScope(1L)).thenReturn(1L);
-        when(mapper.lockTerm(1)).thenReturn(term("ACTIVE"));
+        when(mapper.lockTerm(1, 1)).thenReturn(term("ACTIVE"));
         when(mapper.lockServicePlan(10, 1)).thenReturn(plan);
         when(principal.roleCode()).thenReturn("REGULATOR");
 
@@ -269,7 +299,7 @@ class AcademicServiceTest {
         ServicePlan plan = plan("FILED");
         when(mapper.findServicePlan(10)).thenReturn(plan);
         when(currentUser.schoolScope(1L)).thenReturn(1L);
-        when(mapper.lockTerm(1)).thenReturn(term("DRAFT"));
+        when(mapper.lockTerm(1, 1)).thenReturn(term("DRAFT"));
         when(mapper.lockServicePlan(10, 1)).thenReturn(plan);
         when(principal.roleCode()).thenReturn("REGULATOR");
 
@@ -285,7 +315,7 @@ class AcademicServiceTest {
         ServicePlan plan = plan("ACTIVE");
         when(mapper.findServicePlan(10)).thenReturn(plan);
         when(currentUser.schoolScope(1L)).thenReturn(1L);
-        when(mapper.lockTerm(1)).thenReturn(term("ACTIVE"));
+        when(mapper.lockTerm(1, 1)).thenReturn(term("ACTIVE"));
         when(mapper.lockServicePlan(10, 1)).thenReturn(plan);
         when(principal.roleCode()).thenReturn("REGULATOR");
         when(mapper.transitionServicePlan(
@@ -305,7 +335,7 @@ class AcademicServiceTest {
                 new AcademicController.PlanTransitionRequest("CLOSED", null));
 
         InOrder writes = inOrder(mapper);
-        writes.verify(mapper).lockTerm(1);
+        writes.verify(mapper).lockTerm(1, 1);
         writes.verify(mapper).lockServicePlan(10, 1);
         writes.verify(mapper).lockPlanOfferings(10);
         writes.verify(mapper).transitionServicePlan(
@@ -326,7 +356,7 @@ class AcademicServiceTest {
         alreadyCanceled.setId(101);
         alreadyCanceled.setStatus("CANCELED");
         when(currentUser.schoolScope(null)).thenReturn(1L);
-        when(mapper.lockTerm(1)).thenReturn(term("ACTIVE"));
+        when(mapper.lockTerm(1, 1)).thenReturn(term("ACTIVE"));
         when(mapper.lockCalendarOfferings(1)).thenReturn(List.of(40L));
         when(mapper.lockCalendarSessions(1, eventDate))
                 .thenReturn(List.of(future, alreadyCanceled));
@@ -344,7 +374,7 @@ class AcademicServiceTest {
                 null));
 
         InOrder writes = inOrder(mapper);
-        writes.verify(mapper).lockTerm(1);
+        writes.verify(mapper).lockTerm(1, 1);
         writes.verify(mapper).lockCalendarOfferings(1);
         writes.verify(mapper).lockCalendarSessions(1, eventDate);
         writes.verify(mapper).countCalendarSessionHistory(1, 100);
@@ -358,7 +388,7 @@ class AcademicServiceTest {
     void rejectsClosedCalendarDayWhenSessionHasBusinessHistory() {
         LocalDate eventDate = LocalDate.of(2026, 9, 2);
         when(currentUser.schoolScope(null)).thenReturn(1L);
-        when(mapper.lockTerm(1)).thenReturn(term("ACTIVE"));
+        when(mapper.lockTerm(1, 1)).thenReturn(term("ACTIVE"));
         when(mapper.lockCalendarOfferings(1)).thenReturn(List.of(40L));
         when(mapper.lockCalendarSessions(1, eventDate)).thenReturn(List.of(session()));
         when(mapper.countCalendarSessionHistory(1, 100)).thenReturn(1);
@@ -387,7 +417,7 @@ class AcademicServiceTest {
         AcademicTerm currentTerm = term("ACTIVE");
         currentTerm.setStartDate(LocalDate.of(2026, 7, 1));
         when(currentUser.schoolScope(null)).thenReturn(1L);
-        when(mapper.lockTerm(1)).thenReturn(currentTerm);
+        when(mapper.lockTerm(1, 1)).thenReturn(currentTerm);
         when(mapper.lockCalendarOfferings(1)).thenReturn(List.of(40L));
         when(mapper.lockCalendarSessions(1, eventDate)).thenReturn(List.of(started));
 
@@ -411,7 +441,7 @@ class AcademicServiceTest {
     void updatingEventToClosedDayReconcilesSessionsBeforeChangingCalendar() {
         LocalDate eventDate = LocalDate.of(2026, 9, 2);
         when(currentUser.schoolScope(null)).thenReturn(1L);
-        when(mapper.lockTerm(1)).thenReturn(term("ACTIVE"));
+        when(mapper.lockTerm(1, 1)).thenReturn(term("ACTIVE"));
         when(mapper.lockCalendarEvent(500, 1)).thenReturn(500L);
         when(mapper.lockCalendarOfferings(1)).thenReturn(List.of(40L));
         when(mapper.lockCalendarSessions(1, eventDate)).thenReturn(List.of(session()));
@@ -430,7 +460,7 @@ class AcademicServiceTest {
                         null));
 
         InOrder writes = inOrder(mapper);
-        writes.verify(mapper).lockTerm(1);
+        writes.verify(mapper).lockTerm(1, 1);
         writes.verify(mapper).lockCalendarEvent(500, 1);
         writes.verify(mapper).lockCalendarOfferings(1);
         writes.verify(mapper).lockCalendarSessions(1, eventDate);
@@ -444,7 +474,7 @@ class AcademicServiceTest {
     void teachingDayDoesNotTouchExistingSessions() {
         LocalDate eventDate = LocalDate.of(2026, 9, 2);
         when(currentUser.schoolScope(null)).thenReturn(1L);
-        when(mapper.lockTerm(1)).thenReturn(term("ACTIVE"));
+        when(mapper.lockTerm(1, 1)).thenReturn(term("ACTIVE"));
         when(mapper.findCalendarEventByDate(1, eventDate))
                 .thenReturn(Map.of("id", 500L));
 
@@ -469,7 +499,7 @@ class AcademicServiceTest {
         RoomResource room = room();
         when(mapper.findSessionResource(100)).thenReturn(session);
         when(currentUser.schoolScope(1L)).thenReturn(1L);
-        when(mapper.lockTerm(1)).thenReturn(term("ACTIVE"));
+        when(mapper.lockTerm(1, 1)).thenReturn(term("ACTIVE"));
         when(mapper.lockTeacher(20, 1)).thenReturn(20L);
         when(mapper.lockRoom(30, 1)).thenReturn(room);
         when(mapper.lockOffering(40, 1)).thenReturn(40L);
@@ -512,7 +542,7 @@ class AcademicServiceTest {
                         "参加区级活动"));
 
         InOrder locks = inOrder(mapper);
-        locks.verify(mapper).lockTerm(1);
+        locks.verify(mapper).lockTerm(1, 1);
         locks.verify(mapper).lockTeacher(20, 1);
         locks.verify(mapper).lockRoom(30, 1);
         locks.verify(mapper).lockOffering(40, 1);
@@ -549,7 +579,7 @@ class AcademicServiceTest {
         SessionResource session = session();
         when(mapper.findSessionResource(100)).thenReturn(session);
         when(currentUser.schoolScope(1L)).thenReturn(1L);
-        when(mapper.lockTerm(1)).thenReturn(term("ACTIVE"));
+        when(mapper.lockTerm(1, 1)).thenReturn(term("ACTIVE"));
         when(mapper.lockTeacher(20, 1)).thenReturn(20L);
         when(mapper.lockRoom(30, 1)).thenReturn(room());
         when(mapper.lockOffering(40, 1)).thenReturn(40L);
@@ -687,7 +717,7 @@ class AcademicServiceTest {
         service.revertScheduleAdjustment(900);
 
         InOrder writes = inOrder(mapper);
-        writes.verify(mapper).lockTerm(1);
+        writes.verify(mapper).lockTerm(1, 1);
         writes.verify(mapper).lockTeacher(20, 1);
         writes.verify(mapper).lockRoom(30, 1);
         writes.verify(mapper).lockOffering(40, 1);
@@ -801,7 +831,7 @@ class AcademicServiceTest {
     private void configureReschedulePrerequisites(SessionResource session) {
         when(mapper.findSessionResource(100)).thenReturn(session);
         when(currentUser.schoolScope(1L)).thenReturn(1L);
-        when(mapper.lockTerm(1)).thenReturn(term("ACTIVE"));
+        when(mapper.lockTerm(1, 1)).thenReturn(term("ACTIVE"));
         when(mapper.lockTeacher(20, 1)).thenReturn(20L);
         when(mapper.lockRoom(30, 1)).thenReturn(room());
         when(mapper.lockOffering(40, 1)).thenReturn(40L);
@@ -813,7 +843,7 @@ class AcademicServiceTest {
         when(mapper.findScheduleAdjustmentResource(900)).thenReturn(adjustment);
         when(currentUser.schoolScope(1L)).thenReturn(1L);
         when(mapper.findSessionResource(100)).thenReturn(current);
-        when(mapper.lockTerm(1)).thenReturn(term("ACTIVE"));
+        when(mapper.lockTerm(1, 1)).thenReturn(term("ACTIVE"));
         when(mapper.lockTeacher(20, 1)).thenReturn(20L);
         when(mapper.lockRoom(30, 1)).thenReturn(room());
         when(mapper.lockOffering(40, 1)).thenReturn(40L);

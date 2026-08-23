@@ -11,6 +11,7 @@
         <result property="displayName" column="display_name"/>
         <result property="enabled" column="enabled"/>
         <result property="roleCode" column="role_code"/>
+        <result property="studentId" column="student_id"/>
         <result property="teacherId" column="teacher_id"/>
         <result property="guardianId" column="guardian_id"/>
     </resultMap>
@@ -23,10 +24,12 @@
                u.display_name,
                u.enabled,
                r.role_code,
+               st.id AS student_id,
                t.id AS teacher_id,
                g.id AS guardian_id
         FROM sys_user u
         JOIN sys_role r ON r.id = u.role_id AND r.enabled = TRUE
+        LEFT JOIN student st ON st.user_id = u.id AND st.status = 'ACTIVE'
         LEFT JOIN teacher t ON t.user_id = u.id AND t.status = 'ACTIVE'
         LEFT JOIN guardian g ON g.user_id = u.id AND g.status = 'ACTIVE'
         WHERE u.username = #{username}
@@ -47,10 +50,12 @@
                u.display_name,
                u.enabled,
                r.role_code,
+               st.id AS student_id,
                t.id AS teacher_id,
                g.id AS guardian_id
         FROM sys_user u
         JOIN sys_role r ON r.id = u.role_id AND r.enabled = TRUE
+        LEFT JOIN student st ON st.user_id = u.id AND st.status = 'ACTIVE'
         LEFT JOIN teacher t ON t.user_id = u.id AND t.status = 'ACTIVE'
         LEFT JOIN guardian g ON g.user_id = u.id AND g.status = 'ACTIVE'
         WHERE u.id = #{id}
@@ -59,6 +64,13 @@
               SELECT 1 FROM school s
               WHERE s.id = u.school_id AND s.status = 'ACTIVE'
           ))
+          AND (
+              r.role_code != 'STUDENT'
+              OR EXISTS (
+                  SELECT 1 FROM student st
+                  WHERE st.user_id = u.id AND st.status = 'ACTIVE'
+              )
+          )
           AND (
               r.role_code != 'TEACHER'
               OR EXISTS (

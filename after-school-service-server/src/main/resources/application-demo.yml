@@ -3,7 +3,7 @@ spring:
   # shell or service. It is intentionally pinned to a loopback-only dedicated
   # database; scripts/run-demo.sh provides the supported launch path.
   datasource:
-    url: jdbc:mysql://127.0.0.1:${DEMO_MYSQL_PORT:3306}/after_school_demo?useUnicode=true&characterEncoding=UTF-8&connectionTimeZone=%2B08%3A00&forceConnectionTimeZoneToSession=true&allowPublicKeyRetrieval=true&useSSL=false
+    url: jdbc:mysql://127.0.0.1:${DEMO_MYSQL_PORT:3306}/${DEMO_DB_NAME:after_school_demo}?useUnicode=true&characterEncoding=UTF-8&connectionTimeZone=%2B08%3A00&forceConnectionTimeZoneToSession=true&allowPublicKeyRetrieval=true&useSSL=false
     username: ${DEMO_DB_USERNAME:after_school_demo}
     password: ${DEMO_DB_PASSWORD}
   flyway:

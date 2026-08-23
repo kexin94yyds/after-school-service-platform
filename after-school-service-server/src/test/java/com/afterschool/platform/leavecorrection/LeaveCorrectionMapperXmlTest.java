@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Test;
 class LeaveCorrectionMapperXmlTest {
 
     @Test
-    void everyGuardianAuthorizationPathRequiresCurrentBinding()
+    void guardianReadsRequireBindingAndStudentWithdrawalUsesStudentIdentity()
             throws Exception {
         Configuration configuration = mapperConfiguration();
 
@@ -59,14 +59,15 @@ class LeaveCorrectionMapperXmlTest {
         assertThat(sql(
                         configuration,
                         "withdrawLeave",
-                        Map.of("id", 50L, "guardianId", 30L, "withdrawnBy", 3L)))
+                        Map.of("id", 50L, "studentId", 40L, "withdrawnBy", 3L)))
                 .doesNotContain("student_guardian")
-                .contains("guardian_id = ?");
+                .contains("student_id = ?");
 
         Map<String, Object> listParameters = new HashMap<>();
         listParameters.put("schoolId", 1L);
         listParameters.put("teacherId", null);
         listParameters.put("guardianId", 30L);
+        listParameters.put("studentId", null);
         listParameters.put("offeringId", null);
         listParameters.put("sessionId", null);
         listParameters.put("status", null);

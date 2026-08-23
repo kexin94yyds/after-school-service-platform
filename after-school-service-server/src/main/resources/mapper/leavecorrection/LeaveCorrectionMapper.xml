@@ -167,6 +167,44 @@
         ORDER BY ls.session_date, ls.start_time, ls.id
     </select>
 
+    <select id="listStudentLeaveSessions" resultType="map">
+        SELECT ls.id,
+               ls.school_id AS schoolId,
+               s.school_name AS schoolName,
+               ls.offering_id AS offeringId,
+               o.offering_code AS offeringCode,
+               c.course_name AS courseName,
+               t.full_name AS teacherName,
+               ls.session_date AS sessionDate,
+               ls.start_time AS startTime,
+               ls.end_time AS endTime,
+               ls.classroom,
+               ls.status,
+               lr.id AS activeLeaveRequestId,
+               lr.status AS activeLeaveStatus,
+               lr.reason AS activeLeaveReason
+        FROM lesson_session ls
+        JOIN course_offering o ON o.id = ls.offering_id
+        JOIN course c ON c.id = o.course_id
+        JOIN teacher t ON t.id = o.teacher_id
+        JOIN school s ON s.id = ls.school_id
+        JOIN enrollment e
+          ON e.school_id = ls.school_id
+         AND e.offering_id = ls.offering_id
+         AND e.student_id = #{studentId}
+        LEFT JOIN leave_request lr
+          ON lr.session_id = ls.id
+         AND lr.student_id = e.student_id
+         AND lr.status IN ('PENDING', 'APPROVED')
+        WHERE ls.status = 'SCHEDULED'
+          AND o.status IN ('PUBLISHED', 'CLOSED')
+          AND TIMESTAMP(ls.session_date, ls.start_time) &gt; #{now}
+          AND e.enrolled_at &lt;= TIMESTAMP(ls.session_date, ls.start_time)
+          AND (e.canceled_at IS NULL
+               OR e.canceled_at &gt;= TIMESTAMP(ls.session_date, ls.start_time))
+        ORDER BY ls.session_date, ls.start_time, ls.id
+    </select>
+
     <select id="lockGuardianEligibleEnrollment" resultType="long">
         SELECT e.id
         FROM enrollment e
@@ -248,7 +286,7 @@
             withdrawn_by = #{withdrawnBy},
             withdrawn_at = CURRENT_TIMESTAMP(3)
         WHERE id = #{id}
-          AND guardian_id = #{guardianId}
+          AND student_id = #{studentId}
           AND status = 'PENDING'
     </update>
 
@@ -300,7 +338,7 @@
         JOIN course c ON c.id = o.course_id
         JOIN lesson_session ls ON ls.id = lr.session_id
         JOIN student st ON st.id = lr.student_id
-        JOIN guardian g ON g.id = lr.guardian_id
+        LEFT JOIN guardian g ON g.id = lr.guardian_id
         JOIN sys_user submitter ON submitter.id = lr.submitted_by
         LEFT JOIN sys_user reviewer ON reviewer.id = lr.reviewed_by
         LEFT JOIN sys_user withdrawer ON withdrawer.id = lr.withdrawn_by
@@ -315,11 +353,11 @@
         JOIN course c ON c.id = o.course_id
         JOIN lesson_session ls ON ls.id = lr.session_id
         JOIN student st ON st.id = lr.student_id
-        JOIN guardian g ON g.id = lr.guardian_id
+        LEFT JOIN guardian g ON g.id = lr.guardian_id
         <if test="guardianId != null">
             JOIN student_guardian current_binding
               ON current_binding.student_id = lr.student_id
-             AND current_binding.guardian_id = lr.guardian_id
+             AND current_binding.guardian_id = #{guardianId}
              AND current_binding.is_active = TRUE
         </if>
         JOIN sys_user submitter ON submitter.id = lr.submitted_by
@@ -328,7 +366,8 @@
         <where>
             <if test="schoolId != null">AND lr.school_id = #{schoolId}</if>
             <if test="teacherId != null">AND o.teacher_id = #{teacherId}</if>
-            <if test="guardianId != null">AND lr.guardian_id = #{guardianId}</if>
+            <if test="guardianId != null">AND current_binding.guardian_id = #{guardianId}</if>
+            <if test="studentId != null">AND lr.student_id = #{studentId}</if>
             <if test="offeringId != null">AND lr.offering_id = #{offeringId}</if>
             <if test="sessionId != null">AND lr.session_id = #{sessionId}</if>
             <if test="status != null">AND lr.status = #{status}</if>
@@ -610,6 +649,13 @@
           ON gu.id = g.user_id
          AND gu.school_id = a.school_id
         WHERE a.id = #{attendanceId}
+    </select>
+
+    <select id="countStudentAttendanceAccess" resultType="int">
+        SELECT COUNT(*)
+        FROM attendance
+        WHERE id = #{attendanceId}
+          AND student_id = #{studentId}
     </select>
 
     <select id="listAttendanceRevisions" resultType="map">

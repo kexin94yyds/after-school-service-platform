@@ -15,10 +15,10 @@ declare module 'vue-router' {
 }
 
 export const roleHomePaths: Record<RoleCode, string> = {
-  REGULATOR: '/regulator',
   SCHOOL_ADMIN: '/school',
   TEACHER: '/teacher',
   GUARDIAN: '/parent',
+  STUDENT: '/student',
 }
 
 const routes: RouteRecordRaw[] = [
@@ -26,71 +26,100 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/login',
     name: 'login',
-    component: () => import('@/views/LoginView.vue'),
+    component: () => import('@/views/LoginGatewayView.vue'),
     meta: { title: '登录', public: true },
   },
   {
-    path: '/regulator',
+    path: '/login/student',
+    name: 'student-login',
+    component: () => import('@/views/LoginView.vue'),
+    props: {
+      expectedRole: 'STUDENT',
+      roleTitle: '学生',
+      roleDescription: '从选课到成绩，掌握自己的课后学习安排',
+    },
+    meta: { title: '学生登录', public: true },
+  },
+  {
+    path: '/login/parent',
+    name: 'parent-login',
+    component: () => import('@/views/LoginView.vue'),
+    props: {
+      expectedRole: 'GUARDIAN',
+      roleTitle: '家长',
+      roleDescription: '了解子女课表、考勤、成绩与课程体验',
+    },
+    meta: { title: '家长登录', public: true },
+  },
+  {
+    path: '/login/teacher',
+    name: 'teacher-login',
+    component: () => import('@/views/LoginView.vue'),
+    props: {
+      expectedRole: 'TEACHER',
+      roleTitle: '教师',
+      roleDescription: '聚焦授课任务、课堂考勤与学习评价',
+    },
+    meta: { title: '教师登录', public: true },
+  },
+  {
+    path: '/login/admin',
+    name: 'admin-login',
+    component: () => import('@/views/LoginView.vue'),
+    props: {
+      expectedRole: 'SCHOOL_ADMIN',
+      roleTitle: '教务管理员',
+      roleDescription: '统筹课程、开课计划、排课与教务质量',
+    },
+    meta: { title: '教务管理员登录', public: true },
+  },
+  {
+    path: '/student',
     component: RoleLayout,
-    meta: { title: '监管端', roles: ['REGULATOR'] },
+    meta: { title: '学生端', roles: ['STUDENT'] },
     children: [
       {
         path: '',
-        name: 'regulator-home',
-        component: () => import('@/views/regulator/RegulatorHomeView.vue'),
-        meta: { title: '监管总览', roles: ['REGULATOR'] },
+        name: 'student-home',
+        component: () => import('@/views/student/StudentHomeView.vue'),
+        meta: { title: '学生工作台', roles: ['STUDENT'] },
       },
       {
-        path: 'schools',
-        name: 'regulator-schools',
-        component: () => import('@/views/regulator/SchoolDirectoryView.vue'),
-        meta: { title: '学校管理', roles: ['REGULATOR'] },
+        path: 'enrollments',
+        name: 'student-enrollments',
+        component: () => import('@/views/student/StudentEnrollmentView.vue'),
+        meta: { title: '学生选课', roles: ['STUDENT'] },
       },
       {
-        path: 'academic',
-        name: 'regulator-academic',
-        component: () =>
-          import('@/views/regulator/AcademicGovernanceView.vue'),
-        meta: { title: '学期与计划备案', roles: ['REGULATOR'] },
+        path: 'schedule',
+        name: 'student-schedule',
+        component: () => import('@/views/student/StudentScheduleView.vue'),
+        meta: { title: '个人课表', roles: ['STUDENT'] },
       },
       {
-        path: 'supervision',
-        name: 'regulator-supervision',
-        component: () =>
-          import('@/views/regulator/SupervisionAlertsView.vue'),
-        meta: { title: '监管预警', roles: ['REGULATOR'] },
+        path: 'attendance',
+        name: 'student-attendance',
+        component: () => import('@/views/student/StudentAttendanceView.vue'),
+        meta: { title: '请假与考勤', roles: ['STUDENT'] },
       },
       {
-        path: 'reports',
-        name: 'regulator-reports',
-        component: () => import('@/views/regulator/ReportOverviewView.vue'),
-        meta: { title: '监管统计', roles: ['REGULATOR'] },
-      },
-      {
-        path: 'analysis',
-        name: 'regulator-analysis',
-        component: () =>
-          import('@/views/regulator/ComprehensiveAnalysisView.vue'),
-        meta: { title: '综合分析', roles: ['REGULATOR'] },
-      },
-      {
-        path: 'audit',
-        name: 'regulator-audit',
-        component: () => import('@/views/regulator/OperationAuditView.vue'),
-        meta: { title: '操作审计', roles: ['REGULATOR'] },
+        path: 'grades',
+        name: 'student-grades',
+        component: () => import('@/views/student/StudentGradesView.vue'),
+        meta: { title: '成绩与评价', roles: ['STUDENT'] },
       },
     ],
   },
   {
     path: '/school',
     component: RoleLayout,
-    meta: { title: '学校管理端', roles: ['SCHOOL_ADMIN'] },
+    meta: { title: '教务管理端', roles: ['SCHOOL_ADMIN'] },
     children: [
       {
         path: '',
         name: 'school-home',
         component: () => import('@/views/school/SchoolHomeView.vue'),
-        meta: { title: '学校工作台', roles: ['SCHOOL_ADMIN'] },
+        meta: { title: '教务工作台', roles: ['SCHOOL_ADMIN'] },
       },
       {
         path: 'organization',
@@ -111,16 +140,16 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '学期资源', roles: ['SCHOOL_ADMIN'] },
       },
       {
+        path: 'terms',
+        name: 'school-terms',
+        component: () => import('@/views/school/TermManagementView.vue'),
+        meta: { title: '学期管理', roles: ['SCHOOL_ADMIN'] },
+      },
+      {
         path: 'enrollments',
         name: 'school-enrollments',
         component: () => import('@/views/school/EnrollmentManagementView.vue'),
         meta: { title: '报名管理', roles: ['SCHOOL_ADMIN'] },
-      },
-      {
-        path: 'teaching',
-        name: 'school-teaching',
-        component: () => import('@/views/teacher/TeacherSessionsView.vue'),
-        meta: { title: '授课与考勤', roles: ['SCHOOL_ADMIN'] },
       },
       {
         path: 'schedule-adjustments',
@@ -149,6 +178,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/regulator/ReportOverviewView.vue'),
         props: { scope: 'school' },
         meta: { title: '本校统计', roles: ['SCHOOL_ADMIN'] },
+      },
+      {
+        path: 'grades',
+        name: 'school-grades',
+        component: () => import('@/views/school/SchoolGradesView.vue'),
+        meta: { title: '成绩统计', roles: ['SCHOOL_ADMIN'] },
       },
       {
         path: 'audit',
@@ -182,6 +217,12 @@ const routes: RouteRecordRaw[] = [
           import('@/views/teacher/TeacherLeaveCorrectionView.vue'),
         meta: { title: '请假与纠错', roles: ['TEACHER'] },
       },
+      {
+        path: 'grades',
+        name: 'teacher-grades',
+        component: () => import('@/views/teacher/TeacherGradesView.vue'),
+        meta: { title: '成绩与评价', roles: ['TEACHER'] },
+      },
     ],
   },
   {
@@ -196,16 +237,10 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '家长服务', roles: ['GUARDIAN'] },
       },
       {
-        path: 'enrollments',
-        name: 'parent-enrollments',
-        component: () => import('@/views/parent/GuardianEnrollmentView.vue'),
-        meta: { title: '学生选课', roles: ['GUARDIAN'] },
-      },
-      {
-        path: 'leaves',
-        name: 'parent-leaves',
-        component: () => import('@/views/parent/GuardianLeaveView.vue'),
-        meta: { title: '课次请假', roles: ['GUARDIAN'] },
+        path: 'children',
+        name: 'parent-children',
+        component: () => import('@/views/parent/ParentChildRecordsView.vue'),
+        meta: { title: '子女教务信息', roles: ['GUARDIAN'] },
       },
       {
         path: 'evaluations',

@@ -51,6 +51,7 @@ public interface PeopleMapper {
 
     int insertStudent(
             @Param("schoolId") long schoolId,
+            @Param("userId") long userId,
             @Param("classId") long classId,
             @Param("studentNo") String studentNo,
             @Param("fullName") String fullName,
@@ -67,6 +68,13 @@ public interface PeopleMapper {
             @Param("gender") String gender,
             @Param("dateOfBirth") LocalDate dateOfBirth,
             @Param("status") String status);
+
+    Long studentUserId(@Param("id") long id, @Param("schoolId") long schoolId);
+
+    int attachStudentUser(
+            @Param("id") long id,
+            @Param("schoolId") long schoolId,
+            @Param("userId") long userId);
 
     List<Map<String, Object>> listGuardians(@Param("schoolId") Long schoolId);
 

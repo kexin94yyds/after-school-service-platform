@@ -325,7 +325,7 @@ function queryTab(value: unknown): ResourceTab {
 function schoolId(): number {
   const id = session.user?.schoolId
   if (!id) {
-    throw new ApiClientError('当前学校管理员账号未绑定学校。', {
+    throw new ApiClientError('当前教务管理员账号未绑定学校。', {
       code: 'SCHOOL_CONTEXT_REQUIRED',
     })
   }
@@ -517,13 +517,13 @@ async function savePlan(): Promise<void> {
   }
 }
 
-async function submitPlan(plan: ServicePlan): Promise<void> {
+async function activatePlan(plan: ServicePlan): Promise<void> {
   try {
     await ElMessageBox.confirm(
-      `提交“${plan.planName}”后，计划内容将冻结并进入监管备案流程。确认材料已经完整？`,
-      '确认提交备案',
+      `启用“${plan.planName}”后，计划内容将冻结并可用于开班排课。确认计划明细完整？`,
+      '确认启用计划',
       {
-        confirmButtonText: '提交备案',
+        confirmButtonText: '确认启用',
         cancelButtonText: '继续编辑',
         type: 'warning',
       },
@@ -533,8 +533,14 @@ async function submitPlan(plan: ServicePlan): Promise<void> {
   }
   submittingPlanId.value = plan.id
   try {
-    await academicApi.transitionServicePlan(plan.id, 'SUBMITTED')
-    ElMessage.success('服务计划已提交备案')
+    if (['DRAFT', 'RETURNED'].includes(plan.status)) {
+      await academicApi.transitionServicePlan(plan.id, 'SUBMITTED')
+    }
+    if (['DRAFT', 'RETURNED', 'SUBMITTED'].includes(plan.status)) {
+      await academicApi.transitionServicePlan(plan.id, 'FILED')
+    }
+    await academicApi.transitionServicePlan(plan.id, 'ACTIVE')
+    ElMessage.success('开课计划已启用')
     await loadPlans()
   } catch (error) {
     ElMessage.error(getErrorMessage(error, '服务计划提交失败。'))
@@ -657,7 +663,7 @@ onMounted(async () => {
     <PageHeader
       kicker="学校学期准备"
       title="学期资源与服务计划"
-      description="以统一学期为上下文维护备案计划、标准教室和校历。资源约束会贯穿开班与调课，避免同一时段重复占用。"
+      description="以统一学期为上下文维护开课计划、标准教室和校历。资源约束会贯穿开班与调课，避免同一时段重复占用。"
     >
       <template #actions>
         <el-button
@@ -693,7 +699,7 @@ onMounted(async () => {
           {{ formatDate(selectedTerm.endDate) }}
           · {{ statusLabel(selectedTerm.status) }}
         </small>
-        <small v-else>区域监管端建立学期后，学校才能维护计划和校历。</small>
+        <small v-else>请先在“学期管理”中建立学期，再维护开课计划和校历。</small>
       </div>
       <el-select
         v-model="selectedTermId"
@@ -720,7 +726,7 @@ onMounted(async () => {
             <header class="entity-panel-header">
               <div>
                 <h2>本校服务计划</h2>
-                <p>草稿或退回计划可编辑；提交后由监管端依次备案和启动。</p>
+                <p>草稿或退回计划可编辑；教务管理员确认后启用。</p>
               </div>
               <div class="plan-toolbar">
                 <el-input
@@ -797,7 +803,7 @@ onMounted(async () => {
                       提交 {{ formatDateTime((row as ServicePlan).submittedAt) }}
                     </span>
                     <span>
-                      备案 {{ formatDateTime((row as ServicePlan).filedAt) }}
+                      确认 {{ formatDateTime((row as ServicePlan).filedAt) }}
                     </span>
                   </div>
                 </template>
@@ -809,7 +815,7 @@ onMounted(async () => {
                       计划明细
                     </el-button>
                     <el-button
-                      v-if="['DRAFT', 'RETURNED'].includes((row as ServicePlan).status)"
+                      v-if="['DRAFT', 'RETURNED', 'SUBMITTED', 'FILED'].includes((row as ServicePlan).status)"
                       text
                       type="primary"
                       @click="openEditPlan(row as ServicePlan)"
@@ -821,9 +827,9 @@ onMounted(async () => {
                       text
                       type="warning"
                       :loading="submittingPlanId === (row as ServicePlan).id"
-                      @click="submitPlan(row as ServicePlan)"
+                      @click="activatePlan(row as ServicePlan)"
                     >
-                      提交备案
+                      启用计划
                     </el-button>
                   </div>
                 </template>
@@ -831,15 +837,15 @@ onMounted(async () => {
               <template #empty>
                 <div class="empty-state">
                   <strong>当前学期暂无服务计划</strong>
-                  <span>新建计划并完善内容后，可提交区域监管备案。</span>
+                  <span>新建计划并完善明细后，可由教务管理员启用。</span>
                 </div>
               </template>
             </el-table>
           </section>
           <EntityCrudPanel
             v-if="itemPlan"
-            :title="`${itemPlan.planName} · 备案明细`"
-            description="逐项填写课程类型、计划开班规模和师资配置；至少一条完整明细后才能提交备案。"
+            :title="`${itemPlan.planName} · 开课明细`"
+            description="逐项填写课程类型、计划开班规模和师资配置；至少一条完整明细后才能启用。"
             :rows="planItems"
             :columns="planItemColumns"
             :fields="planItemFields"

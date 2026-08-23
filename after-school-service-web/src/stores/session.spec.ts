@@ -59,9 +59,9 @@ describe('session store', () => {
     vi.mocked(authApi.fetchCurrentUser).mockResolvedValue(user)
     const store = useSessionStore()
 
-    await expect(store.signIn(' teacher01 ', 'secret')).resolves.toEqual(user)
+    await expect(store.signIn(' teacher01 ', 'secret', 'TEACHER')).resolves.toEqual(user)
 
-    expect(authApi.login).toHaveBeenCalledWith(' teacher01 ', 'secret')
+    expect(authApi.login).toHaveBeenCalledWith(' teacher01 ', 'secret', 'TEACHER')
     expect(authApi.fetchCurrentUser).toHaveBeenCalledOnce()
     expect(store.user).toEqual(user)
   })

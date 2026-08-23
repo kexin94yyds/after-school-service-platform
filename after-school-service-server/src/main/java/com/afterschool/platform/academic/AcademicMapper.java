@@ -9,17 +9,26 @@ import org.apache.ibatis.annotations.Param;
 
 public interface AcademicMapper {
 
-    List<Map<String, Object>> listTerms();
+    List<Map<String, Object>> listTerms(@Param("schoolId") long schoolId);
 
-    Map<String, Object> findTermByCode(@Param("termCode") String termCode);
+    Map<String, Object> findTermByCode(
+            @Param("schoolId") long schoolId,
+            @Param("termCode") String termCode);
 
-    AcademicTerm findTerm(@Param("id") long id);
+    AcademicTerm findTerm(
+            @Param("id") long id,
+            @Param("schoolId") long schoolId);
 
-    AcademicTerm lockTerm(@Param("id") long id);
+    AcademicTerm lockTerm(
+            @Param("id") long id,
+            @Param("schoolId") long schoolId);
 
-    List<Long> lockTermOfferings(@Param("termId") long termId);
+    List<Long> lockTermOfferings(
+            @Param("termId") long termId,
+            @Param("schoolId") long schoolId);
 
     int insertTerm(
+            @Param("schoolId") long schoolId,
             @Param("termCode") String termCode,
             @Param("termName") String termName,
             @Param("startDate") LocalDate startDate,
@@ -29,13 +38,16 @@ public interface AcademicMapper {
 
     int updateTerm(
             @Param("id") long id,
+            @Param("schoolId") long schoolId,
             @Param("termCode") String termCode,
             @Param("termName") String termName,
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate,
             @Param("status") String status);
 
-    int countTermPlans(@Param("termId") long termId);
+    int countTermPlans(
+            @Param("termId") long termId,
+            @Param("schoolId") long schoolId);
 
     List<Map<String, Object>> listServicePlans(
             @Param("schoolId") Long schoolId,

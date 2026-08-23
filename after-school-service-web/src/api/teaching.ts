@@ -3,7 +3,6 @@ import type {
   AttendanceRecord,
   AttendanceUpdateRecord,
   LessonSession,
-  SessionStatus,
 } from './types'
 
 export const teachingApi = {
@@ -21,12 +20,11 @@ export const teachingApi = {
   },
   async updateSession(
     sessionId: number,
-    status: SessionStatus,
     notes: string | null,
   ): Promise<LessonSession> {
     const response = await http.put<LessonSession>(
       `/sessions/${sessionId}`,
-      { status, notes },
+      { notes },
     )
     return response.data
   },

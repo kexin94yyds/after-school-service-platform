@@ -200,7 +200,8 @@ class OperationAuditFilterTest {
 
         mockMvc.perform(post("/api/auth/login")
                         .contentType("application/json")
-                        .content("{\"username\":\"school-admin\",\"password\":\"password\"}"))
+                        .content("{\"username\":\"school-admin\",\"password\":\"password\","
+                                + "\"expectedRole\":\"SCHOOL_ADMIN\"}"))
                 .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.code").value("AUDIT_PERSISTENCE_FAILED"));
 

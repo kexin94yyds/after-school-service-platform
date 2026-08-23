@@ -3,18 +3,42 @@
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.afterschool.platform.auth.BootstrapAdminMapper">
+    <select id="countSchoolAdmins" resultType="int">
+        SELECT COUNT(*)
+        FROM sys_user user_account
+        JOIN sys_role role ON role.id = user_account.role_id
+        WHERE role.role_code = 'SCHOOL_ADMIN'
+    </select>
+
+    <select id="countSchools" resultType="int">
+        SELECT COUNT(*) FROM school
+    </select>
+
     <select id="countUsername" resultType="int">
         SELECT COUNT(*)
         FROM sys_user
         WHERE username = #{username}
     </select>
 
-    <insert id="insertRegulator">
+    <insert id="insertSchool">
+        INSERT INTO school (
+            school_code, school_name, district_code, status
+        ) VALUES (
+            #{schoolCode}, #{schoolName}, #{districtCode}, 'ACTIVE'
+        )
+    </insert>
+
+    <select id="findSchoolIdByCode" resultType="long">
+        SELECT id FROM school WHERE school_code = #{schoolCode}
+    </select>
+
+    <insert id="insertSchoolAdmin">
         INSERT INTO sys_user (
             school_id, role_id, username, password_hash, display_name, enabled
         ) VALUES (
-            NULL,
-            (SELECT id FROM sys_role WHERE role_code = 'REGULATOR'),
+            #{schoolId},
+            (SELECT id FROM sys_role
+             WHERE role_code = 'SCHOOL_ADMIN' AND enabled = TRUE),
             #{username},
             #{passwordHash},
             #{displayName},

@@ -5,6 +5,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.util.Map;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -74,6 +75,17 @@ public class AuthController {
         contextRepository.saveContext(context, request, response);
 
         PlatformPrincipal principal = (PlatformPrincipal) authentication.getPrincipal();
+        if (!body.expectedRole().equals(principal.roleCode())) {
+            SecurityContextHolder.clearContext();
+            HttpSession mismatchedSession = request.getSession(false);
+            if (mismatchedSession != null) {
+                mismatchedSession.invalidate();
+            }
+            throw new com.afterschool.platform.common.ApiException(
+                    HttpStatus.FORBIDDEN,
+                    "ROLE_LOGIN_MISMATCH",
+                    "账号角色与当前登录入口不一致");
+        }
         userAccountMapper.updateLastLogin(principal.id());
         return SessionUser.from(principal);
     }
@@ -119,7 +131,10 @@ public class AuthController {
 
     public record LoginRequest(
             @NotBlank(message = "请输入用户名") String username,
-            @NotBlank(message = "请输入密码") @Size(max = 72) String password) {}
+            @NotBlank(message = "请输入密码") @Size(max = 72) String password,
+            @NotBlank
+                    @Pattern(regexp = "STUDENT|GUARDIAN|TEACHER|SCHOOL_ADMIN")
+                    String expectedRole) {}
 
     public record ChangePasswordRequest(
             @NotBlank(message = "请输入当前密码") @Size(max = 72) String currentPassword,
@@ -131,6 +146,7 @@ public class AuthController {
             String username,
             String displayName,
             String role,
+            Long studentId,
             Long teacherId,
             Long guardianId,
             Map<String, Boolean> capabilities) {
@@ -143,14 +159,16 @@ public class AuthController {
                     principal.getUsername(),
                     principal.displayName(),
                     role,
+                    principal.studentId(),
                     principal.teacherId(),
                     principal.guardianId(),
                     Map.of(
-                            "manageSchools", "REGULATOR".equals(role),
+                            "manageSchools", false,
                             "manageSchoolData", "SCHOOL_ADMIN".equals(role),
-                            "recordAttendance", "TEACHER".equals(role) || "SCHOOL_ADMIN".equals(role),
-                            "enrollChildren", "GUARDIAN".equals(role),
-                            "viewReports", "REGULATOR".equals(role) || "SCHOOL_ADMIN".equals(role)));
+                            "recordAttendance", "TEACHER".equals(role),
+                            "enrollSelf", "STUDENT".equals(role),
+                            "viewChildren", "GUARDIAN".equals(role),
+                            "viewReports", "SCHOOL_ADMIN".equals(role)));
         }
     }
 }

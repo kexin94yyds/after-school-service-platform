@@ -84,8 +84,19 @@ public class PeopleService {
     public Map<String, Object> createStudent(PeopleController.StudentRequest request) {
         long schoolId = currentUser.schoolScope(request.schoolId());
         requireClassInSchool(request.classId(), schoolId);
+        requireNewPassword(request.password());
+        NewUser user = new NewUser();
+        user.setSchoolId(schoolId);
+        user.setRoleCode("STUDENT");
+        user.setUsername(request.username().strip());
+        user.setPasswordHash(passwordEncoder.encode(request.password()));
+        user.setDisplayName(request.fullName().strip());
+        user.setMobile(null);
+        user.setEnabled("ACTIVE".equals(request.status()));
+        mapper.insertUser(user);
         mapper.insertStudent(
                 schoolId,
+                user.getId(),
                 request.classId(),
                 request.studentNo().strip(),
                 request.fullName().strip(),
@@ -99,6 +110,24 @@ public class PeopleService {
     public Map<String, Object> updateStudent(long id, PeopleController.StudentRequest request) {
         long schoolId = currentUser.schoolScope(request.schoolId());
         requireClassInSchool(request.classId(), schoolId);
+        Long userId = mapper.studentUserId(id, schoolId);
+        if (userId == null) {
+            requireNewPassword(request.password());
+            NewUser user = new NewUser();
+            user.setSchoolId(schoolId);
+            user.setRoleCode("STUDENT");
+            user.setUsername(request.username().strip());
+            user.setPasswordHash(passwordEncoder.encode(request.password()));
+            user.setDisplayName(request.fullName().strip());
+            user.setMobile(null);
+            user.setEnabled("ACTIVE".equals(request.status()));
+            mapper.insertUser(user);
+            if (mapper.attachStudentUser(id, schoolId, user.getId()) != 1) {
+                throw ApiException.conflict(
+                        "STUDENT_ACCOUNT_CHANGED", "学生账号已被其他操作创建，请刷新后重试");
+            }
+            userId = user.getId();
+        }
         if (mapper.updateStudent(
                         id,
                         schoolId,
@@ -111,6 +140,13 @@ public class PeopleService {
                 == 0) {
             throw ApiException.notFound("学生不存在或不在当前学校");
         }
+        mapper.updateUserProfile(
+                userId,
+                request.username().strip(),
+                request.fullName().strip(),
+                null,
+                "ACTIVE".equals(request.status()),
+                encodedOrNull(request.password()));
         return mapper.findStudentByNo(schoolId, request.studentNo().strip());
     }
 

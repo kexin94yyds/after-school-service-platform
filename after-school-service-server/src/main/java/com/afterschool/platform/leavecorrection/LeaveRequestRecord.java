@@ -4,7 +4,7 @@ public class LeaveRequestRecord extends SessionWorkflowContext {
 
     private long id;
     private long studentId;
-    private long guardianId;
+    private Long guardianId;
     private long submittedBy;
     private String status;
 
@@ -24,11 +24,11 @@ public class LeaveRequestRecord extends SessionWorkflowContext {
         this.studentId = studentId;
     }
 
-    public long getGuardianId() {
+    public Long getGuardianId() {
         return guardianId;
     }
 
-    public void setGuardianId(long guardianId) {
+    public void setGuardianId(Long guardianId) {
         this.guardianId = guardianId;
     }
 

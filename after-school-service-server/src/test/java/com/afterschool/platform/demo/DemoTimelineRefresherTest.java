@@ -56,8 +56,10 @@ class DemoTimelineRefresherTest {
     void computesTheFirstRealClassFromOfferingWeekday() {
         DemoTimelineRefresher.OfferingState offering =
                 new DemoTimelineRefresher.OfferingState(
+                        1L,
                         "O-DEMO-TECH-001",
                         "DEMO-CURRENT",
+                        1L,
                         1L,
                         1L,
                         DayOfWeek.THURSDAY.getValue(),

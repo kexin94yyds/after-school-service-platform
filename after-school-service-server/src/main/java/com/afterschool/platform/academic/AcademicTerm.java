@@ -5,6 +5,7 @@ import java.time.LocalDate;
 public class AcademicTerm {
 
     private long id;
+    private long schoolId;
     private String termCode;
     private String termName;
     private LocalDate startDate;
@@ -17,6 +18,14 @@ public class AcademicTerm {
 
     public void setId(long id) {
         this.id = id;
+    }
+
+    public long getSchoolId() {
+        return schoolId;
+    }
+
+    public void setSchoolId(long schoolId) {
+        this.schoolId = schoolId;
     }
 
     public String getTermCode() {

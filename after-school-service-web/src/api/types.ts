@@ -1,8 +1,8 @@
 export const roleCodes = [
-  'REGULATOR',
   'SCHOOL_ADMIN',
   'TEACHER',
   'GUARDIAN',
+  'STUDENT',
 ] as const
 
 export type RoleCode = (typeof roleCodes)[number]
@@ -13,6 +13,7 @@ export interface SessionUser {
   displayName: string
   role: RoleCode
   schoolId: number | null
+  studentId?: number | null
   teacherId?: number | null
   guardianId?: number | null
   capabilities?: Record<string, boolean>
@@ -122,6 +123,8 @@ export interface TeacherInput {
 export interface Student extends ApiEntity {
   schoolId: number
   schoolName?: string
+  userId: number
+  username: string
   classId: number
   className?: string
   grade?: number
@@ -132,10 +135,17 @@ export interface Student extends ApiEntity {
   status: ActiveStatus
 }
 
-export type StudentInput = Omit<
-  Student,
-  keyof ApiEntity | 'schoolName' | 'className' | 'grade'
->
+export interface StudentInput {
+  schoolId: number
+  classId: number
+  studentNo: string
+  fullName: string
+  username: string
+  password: string | null
+  gender: Gender | null
+  dateOfBirth: string | null
+  status: ActiveStatus
+}
 
 export interface Guardian extends ApiEntity {
   schoolId: number
@@ -277,8 +287,10 @@ export interface Enrollment extends ApiEntity {
   studentId: number
   studentName: string
   studentNo: string
-  guardianId: number
-  guardianName: string
+  classId: number
+  className: string
+  guardianId: number | null
+  guardianName: string | null
   status: EnrollmentStatus
   enrolledAt: string
   canceledAt: string | null
@@ -298,7 +310,7 @@ export interface EnrollmentAction extends ApiEntity {
   relatedEnrollmentId: number | null
   actorUserId: number
   actorName: string
-  actorRole: 'SCHOOL_ADMIN' | 'GUARDIAN'
+  actorRole: 'SCHOOL_ADMIN' | 'GUARDIAN' | 'STUDENT'
   actedAt: string
 }
 
@@ -313,6 +325,30 @@ export interface GuardianStudent extends ApiEntity {
   status: ActiveStatus
   relationship: string
   primaryGuardian: boolean
+}
+
+export interface StudentProfile extends ApiEntity {
+  schoolId: number
+  classId: number
+  className: string
+  grade: number
+  schoolYear: string
+  studentNo: string
+  fullName: string
+  status: ActiveStatus
+}
+
+export interface StudentScheduleItem extends ApiEntity {
+  offeringId: number
+  offeringCode: string
+  courseName: string
+  teacherName: string
+  sessionDate: string
+  startTime: string
+  endTime: string
+  classroom: string
+  status: SessionStatus
+  leaveStatus: string | null
 }
 
 export interface LessonSession extends ApiEntity {

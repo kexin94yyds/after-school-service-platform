@@ -23,6 +23,7 @@ public class PlatformUserDetailsService implements UserDetailsService {
         boolean invalidScopedIdentity =
                 ("REGULATOR".equals(account.getRoleCode()) && account.getSchoolId() != null)
                         || (!"REGULATOR".equals(account.getRoleCode()) && account.getSchoolId() == null)
+                        || ("STUDENT".equals(account.getRoleCode()) && account.getStudentId() == null)
                         || ("TEACHER".equals(account.getRoleCode()) && account.getTeacherId() == null)
                         || ("GUARDIAN".equals(account.getRoleCode()) && account.getGuardianId() == null);
         if (invalidScopedIdentity) {

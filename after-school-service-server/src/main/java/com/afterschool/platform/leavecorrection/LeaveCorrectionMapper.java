@@ -23,6 +23,10 @@ public interface LeaveCorrectionMapper {
             @Param("guardianId") long guardianId,
             @Param("now") LocalDateTime now);
 
+    List<Map<String, Object>> listStudentLeaveSessions(
+            @Param("studentId") long studentId,
+            @Param("now") LocalDateTime now);
+
     Long lockGuardianEligibleEnrollment(
             @Param("schoolId") long schoolId,
             @Param("offeringId") long offeringId,
@@ -48,7 +52,7 @@ public interface LeaveCorrectionMapper {
 
     int withdrawLeave(
             @Param("id") long id,
-            @Param("guardianId") long guardianId,
+            @Param("studentId") long studentId,
             @Param("withdrawnBy") long withdrawnBy);
 
     int reviewLeave(
@@ -63,6 +67,7 @@ public interface LeaveCorrectionMapper {
             @Param("schoolId") Long schoolId,
             @Param("teacherId") Long teacherId,
             @Param("guardianId") Long guardianId,
+            @Param("studentId") Long studentId,
             @Param("offeringId") Long offeringId,
             @Param("sessionId") Long sessionId,
             @Param("status") String status);
@@ -123,6 +128,10 @@ public interface LeaveCorrectionMapper {
     int countGuardianAttendanceAccess(
             @Param("attendanceId") long attendanceId,
             @Param("guardianId") long guardianId);
+
+    int countStudentAttendanceAccess(
+            @Param("attendanceId") long attendanceId,
+            @Param("studentId") long studentId);
 
     List<Map<String, Object>> listAttendanceRevisions(
             @Param("attendanceId") long attendanceId);

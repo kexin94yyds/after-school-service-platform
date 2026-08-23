@@ -128,6 +128,7 @@ const teacherFields: EntityField[] = [
 
 const studentColumns: EntityColumn[] = [
   { key: 'studentNo', label: '学号', minWidth: 120 },
+  { key: 'username', label: '登录账号', minWidth: 140 },
   { key: 'fullName', label: '姓名', minWidth: 110 },
   {
     key: 'classId',
@@ -159,6 +160,15 @@ const studentFields = computed<EntityField[]>(() => [
   },
   { key: 'studentNo', label: '学号', kind: 'text', required: true },
   { key: 'fullName', label: '姓名', kind: 'text', required: true },
+  { key: 'username', label: '登录账号', kind: 'text', required: true },
+  {
+    key: 'password',
+    label: '登录密码',
+    kind: 'password',
+    requiredOnCreate: true,
+    minLength: 12,
+    placeholder: '新增必填；编辑留空则不修改',
+  },
   {
     key: 'gender',
     label: '性别',
@@ -257,7 +267,7 @@ const guardianFields = computed<EntityField[]>(() => [
 function schoolId(): number {
   const id = session.user?.schoolId
   if (!id) {
-    throw new ApiClientError('当前学校管理员账号未绑定学校。', {
+    throw new ApiClientError('当前教务管理员账号未绑定学校。', {
       code: 'SCHOOL_CONTEXT_REQUIRED',
     })
   }
@@ -322,11 +332,19 @@ async function saveStudent(
   id: number | null,
 ): Promise<void> {
   const gender = formString(values, 'gender')
+  const password = formNullableString(values, 'password')
+  if ((id === null && !password) || (password && password.length < 12)) {
+    throw new ApiClientError('登录密码至少需要 12 个字符。', {
+      fieldErrors: { password: '请输入至少 12 个字符' },
+    })
+  }
   const payload: StudentInput = {
     schoolId: schoolId(),
     classId: formNumber(values, 'classId'),
     studentNo: formString(values, 'studentNo'),
     fullName: formString(values, 'fullName'),
+    username: formString(values, 'username'),
+    password,
     gender: gender ? (gender as StudentInput['gender']) : null,
     dateOfBirth: formNullableString(values, 'dateOfBirth'),
     status: formString(values, 'status') as StudentInput['status'],

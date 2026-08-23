@@ -47,27 +47,31 @@ JAR 和前端发布目录只允许 root 写入。后端服务用户只能读取�
 
 `RECTIFICATION_MATERIAL_DIR` 应保持为 `/var/lib/after-school-service/rectification-materials`。systemd 的 `StateDirectory=after-school-service` 会创建父目录并授予服务账号写权限；不要把附件目录放到不可变 release、Web 根目录或共享临时目录。系统仅接受 PDF/JPG/PNG 且单文件不超过 10 MB，数据库保留对象键、大小、SHA-256、上传人和时间。
 
-监管扫描默认每日 02:00（`Asia/Shanghai`）执行。可在 EnvironmentFile 中用 `SUPERVISION_SCAN_ENABLED`、`SUPERVISION_SCAN_CRON`、`SUPERVISION_SCAN_ZONE` 和 `SUPERVISION_SCAN_STALE_AFTER` 调整；cron 含空格，必须保持引号。只关闭定时任务不会禁用监管员手工扫描。首次发布后应在监管端“扫描记录”确认运行来源、起止时间、成败和失败摘要。
+异常扫描默认每日 02:00（`Asia/Shanghai`）由系统执行。可在 EnvironmentFile 中用 `SUPERVISION_SCAN_ENABLED`、`SUPERVISION_SCAN_CRON`、`SUPERVISION_SCAN_ZONE` 和 `SUPERVISION_SCAN_STALE_AFTER` 调整；cron 含空格，必须保持引号。教务管理员在本校监管页面查看扫描产生的异常，历史监管手工扫描入口不属于四角色主流程。
 
-## 4. 首次监管员
+## 4. 首个学校与教务管理员
 
-只在空生产库首次启动时创建监管员。把一次性密码写入 `/etc/after-school-service/bootstrap-password`，权限设为 `0600 root:root`，并创建临时 systemd drop-in：
+只允许在完全空的生产库首次启动时原子创建首个学校和该校教务管理员。把一次性密码写入 `/etc/after-school-service/bootstrap-password`，权限设为 `0600 root:root`，并创建临时 systemd drop-in：
 
 ```ini
 [Service]
 LoadCredential=app.bootstrap.password:/etc/after-school-service/bootstrap-password
-Environment=APP_BOOTSTRAP_USERNAME=initial_regulator
-Environment=APP_BOOTSTRAP_DISPLAY_NAME=初始监管员
+Environment=APP_BOOTSTRAP_ENABLED=true
+Environment=APP_BOOTSTRAP_USERNAME=initial_school_admin
+Environment=APP_BOOTSTRAP_DISPLAY_NAME=初始教务管理员
+Environment=APP_BOOTSTRAP_SCHOOL_CODE=school-001
+Environment=APP_BOOTSTRAP_SCHOOL_NAME=初始化学校
+Environment=APP_BOOTSTRAP_DISTRICT_CODE=district-001
 ```
 
 服务启动并确认账号创建后：
 
-1. 首次登录并立刻修改密码；
+1. 从教务管理员入口首次登录并立刻修改密码；
 2. 删除 drop-in 和 `bootstrap-password`；
 3. 执行 `systemctl daemon-reload` 并重启服务；
 4. 确认旧会话失效，且服务凭据目录不再包含 `app.bootstrap.password`。
 
-不得让一次性初始化密码长期跟随服务重启。
+若库中已有任一教务管理员，初始化器会直接跳过；若已有学校却没有教务管理员，初始化器会拒绝自动接管，必须按恢复流程人工处理。不得让一次性初始化密码长期跟随服务重启。
 
 ## 5. systemd 与后端首次发布
 
@@ -144,9 +148,9 @@ sudo journalctl -u after-school-backup.service --since today
   /secure/age-identity.txt
 ```
 
-目标库必须不存在。脚本会校验 checksum、解密、导入，并确认 Flyway 历史没有失败记录且至少成功应用 V14，确认 17 张核心业务表、报名/计划/通知/整改材料租户外键及 `supervision_alert → supervision_scan_run` 外键均存在，并确认没有预警扫描运行孤儿记录；失败只清理它刚创建的部分库。升级到未来迁移版本后，在恢复演练命令中设置 `RESTORE_REQUIRED_FLYWAY_VERSION` 为当前发布要求的版本，不得降低生产基线。
+目标库必须不存在。脚本会校验 checksum、解密、导入，并确认 Flyway 历史没有失败记录且至少成功应用 V18，确认 19 张核心业务表、10 个关键租户/报名/计划/通知/整改/成绩外键及 `supervision_alert → supervision_scan_run` 外键均存在，并确认没有预警扫描运行孤儿记录；失败只清理它刚创建的部分库。升级到未来迁移版本后，在恢复演练命令中设置 `RESTORE_REQUIRED_FLYWAY_VERSION` 为当前发布要求的版本，不得降低生产基线。
 
-恢复成功后，用恢复库启动一个不对公网开放的应用实例，执行登录、报名、考勤、请假、监管报表只读抽查，再记录实际 RTO。演练完成前不得把问题状态标为已验证。
+恢复成功后，用恢复库启动一个不对公网开放的应用实例，执行登录、报名、考勤、请假、教务报表只读抽查，再记录实际 RTO。演练完成前不得把问题状态标为已验证。
 
 ## 9. 健康监测与外部告警
 
@@ -167,7 +171,7 @@ sudo journalctl -u after-school-backup.service --since today
 5. 发布后端 JAR并等待 readiness；
 6. 发布前端不可变版本；
 7. 执行生产预检；
-8. 观察 journal、错误率和登录限流至少 15 分钟，并确认一次手工监管扫描在运行记录中成功收尾。
+8. 观察 journal、错误率和登录限流至少 15 分钟，确认 journal 中最近一次定时异常扫描出现 `source=SCHEDULED outcome=SUCCESS`，并由教务管理员抽查本校异常列表的数据范围。
 
 CI 使用 `security` Maven profile 执行 OWASP Dependency-Check，CVSS 7.0 及以上已知漏洞会阻断构建；CycloneDX JSON SBOM 在正常 `package` 阶段生成。可在本地复现：
 
@@ -224,7 +228,7 @@ sudo /opt/after-school-service/tools/select-web-release.sh PREVIOUS_RELEASE_ID
 - 恢复演练成功并记录 RPO/RTO；
 - FAILED/RECOVERED 外部告警已实测；
 - 负责人确认防火墙不开放 8081/8082；
-- 首次监管员凭据已移除并修改密码；
+- 首次学校/教务管理员初始化凭据已移除并修改密码；
 - 迁移和回滚方案已审核。
 
 任一项未满足时，只能继续预发布或受控内网试运行，不能标记为正式生产就绪。

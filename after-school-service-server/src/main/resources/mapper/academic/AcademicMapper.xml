@@ -5,6 +5,7 @@
 <mapper namespace="com.afterschool.platform.academic.AcademicMapper">
     <resultMap id="academicTerm" type="com.afterschool.platform.academic.AcademicTerm">
         <id property="id" column="id"/>
+        <result property="schoolId" column="school_id"/>
         <result property="termCode" column="term_code"/>
         <result property="termName" column="term_name"/>
         <result property="startDate" column="start_date"/>
@@ -53,6 +54,7 @@
 
     <sql id="termColumns">
         t.id,
+        t.school_id AS schoolId,
         t.term_code AS termCode,
         t.term_name AS termName,
         t.start_date AS startDate,
@@ -67,6 +69,7 @@
         SELECT <include refid="termColumns"/>
         FROM academic_term t
         JOIN sys_user u ON u.id = t.created_by
+        WHERE t.school_id = #{schoolId}
         ORDER BY t.start_date DESC, t.id DESC
     </select>
 
@@ -74,19 +77,22 @@
         SELECT <include refid="termColumns"/>
         FROM academic_term t
         JOIN sys_user u ON u.id = t.created_by
-        WHERE t.term_code = #{termCode}
+        WHERE t.school_id = #{schoolId}
+          AND t.term_code = #{termCode}
     </select>
 
     <select id="findTerm" resultMap="academicTerm">
-        SELECT id, term_code, term_name, start_date, end_date, status
+        SELECT id, school_id, term_code, term_name, start_date, end_date, status
         FROM academic_term
         WHERE id = #{id}
+          AND school_id = #{schoolId}
     </select>
 
     <select id="lockTerm" resultMap="academicTerm">
-        SELECT id, term_code, term_name, start_date, end_date, status
+        SELECT id, school_id, term_code, term_name, start_date, end_date, status
         FROM academic_term
         WHERE id = #{id}
+          AND school_id = #{schoolId}
         FOR UPDATE
     </select>
 
@@ -94,15 +100,16 @@
         SELECT id
         FROM course_offering
         WHERE term_id = #{termId}
+          AND school_id = #{schoolId}
         ORDER BY id
         FOR UPDATE
     </select>
 
     <insert id="insertTerm">
         INSERT INTO academic_term (
-            term_code, term_name, start_date, end_date, status, created_by
+            school_id, term_code, term_name, start_date, end_date, status, created_by
         ) VALUES (
-            #{termCode}, #{termName}, #{startDate}, #{endDate}, #{status}, #{createdBy}
+            #{schoolId}, #{termCode}, #{termName}, #{startDate}, #{endDate}, #{status}, #{createdBy}
         )
     </insert>
 
@@ -114,12 +121,14 @@
             end_date = #{endDate},
             status = #{status}
         WHERE id = #{id}
+          AND school_id = #{schoolId}
     </update>
 
     <select id="countTermPlans" resultType="int">
         SELECT COUNT(*)
         FROM school_service_plan
         WHERE term_id = #{termId}
+          AND school_id = #{schoolId}
     </select>
 
     <sql id="servicePlanColumns">

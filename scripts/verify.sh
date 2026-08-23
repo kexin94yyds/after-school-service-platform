@@ -16,6 +16,7 @@ restore_script="${project_root}/scripts/restore-mysql-backup.sh"
 monitor_script="${project_root}/scripts/monitor-health.sh"
 run_demo_script="${project_root}/scripts/run-demo.sh"
 production_check_script="${project_root}/scripts/check-production.sh"
+verify_xlsx_script="${project_root}/scripts/VerifyXlsx.java"
 systemd_dir="${project_root}/deploy/systemd"
 config_example_dir="${project_root}/deploy/config"
 production_runbook="${project_root}/docs/production-runbook.md"
@@ -175,6 +176,7 @@ done
 
 [[ -d "${server_dir}" ]] || fail "missing backend directory"
 [[ -d "${web_dir}" ]] || fail "missing frontend directory"
+[[ -s "${verify_xlsx_script}" ]] || fail "missing independent XLSX verifier"
 
 log_step "Checking production operations contract"
 
@@ -680,7 +682,10 @@ for migration in \
   V10__preserve_reviewed_leave_withdrawal_history.sql \
   V12__add_supervision_scan_runs.sql \
   V13__link_supervision_alert_scan_runs.sql \
-  V14__align_opening_report_business_model.sql; do
+  V14__align_opening_report_business_model.sql \
+  V16__add_student_accounts_and_four_role_identity.sql \
+  V17__add_student_grades_and_revision_history.sql \
+  V18__scope_academic_terms_to_school.sql; do
   [[ -f "${migration_dir}/${migration}" ]] || fail "missing migration ${migration}"
 done
 demo_migration="${server_dir}/src/main/resources/db/demo/V4__seed_demo_workflow.sql"
@@ -697,6 +702,11 @@ demo_scan_run_bridge_migration="${server_dir}/src/main/resources/db/demo/V4_1__s
 opening_report_demo_migration="${server_dir}/src/main/resources/db/demo/V15__align_demo_with_opening_report.sql"
 [[ -f "${opening_report_demo_migration}" ]] \
   || fail "missing demo opening-report alignment migration"
+[[ -f "${server_dir}/src/main/resources/db/demo/V20__seed_student_login_accounts.sql" \
+    && -f "${server_dir}/src/main/resources/db/demo/V21__seed_student_grades.sql" ]] \
+  || fail "missing four-role student demo migrations"
+[[ -f "${server_dir}/src/main/resources/db/migration/V18__scope_academic_terms_to_school.sql" ]] \
+  || fail "missing school-scoped academic term migration"
 if grep -RhEq "AfterSchool@2026|123456|'regulator'|'admin'" "${migration_dir}"; then
   fail "default production migrations must not contain demo accounts or passwords"
 fi
@@ -714,7 +724,12 @@ for guard in \
   uk_plan_item_category \
   uk_regulator_notification_alert \
   fk_enrollment_action_identity \
-  uk_rectification_notice_alert; do
+  uk_rectification_notice_alert \
+  uk_student_user \
+  uk_student_grade_target \
+  idx_grade_revision_grade \
+  uk_academic_term_school_code \
+  fk_academic_term_school; do
   grep -RhFq "${guard}" "${migration_dir}" || fail "missing schema guard ${guard}"
 done
 
@@ -756,7 +771,10 @@ for jar_entry in \
   "BOOT-INF/classes/db/migration/V10__preserve_reviewed_leave_withdrawal_history.sql" \
   "BOOT-INF/classes/db/migration/V12__add_supervision_scan_runs.sql" \
   "BOOT-INF/classes/db/migration/V13__link_supervision_alert_scan_runs.sql" \
-  "BOOT-INF/classes/db/migration/V14__align_opening_report_business_model.sql"; do
+  "BOOT-INF/classes/db/migration/V14__align_opening_report_business_model.sql" \
+  "BOOT-INF/classes/db/migration/V16__add_student_accounts_and_four_role_identity.sql" \
+  "BOOT-INF/classes/db/migration/V17__add_student_grades_and_revision_history.sql" \
+  "BOOT-INF/classes/db/migration/V18__scope_academic_terms_to_school.sql"; do
   "${jdk21_home}/bin/jar" tf "${jar_path}" | grep -Fq "${jar_entry}" \
     || fail "backend JAR is missing ${jar_entry}"
 done
@@ -784,6 +802,8 @@ for demo_jar_entry in \
   "BOOT-INF/classes/db/demo/V8__seed_comprehensive_graduation_workflow.sql" \
   "BOOT-INF/classes/db/demo/V11__simplify_demo_login_credentials.sql" \
   "BOOT-INF/classes/db/demo/V15__align_demo_with_opening_report.sql" \
+  "BOOT-INF/classes/db/demo/V20__seed_student_login_accounts.sql" \
+  "BOOT-INF/classes/db/demo/V21__seed_student_grades.sql" \
   "BOOT-INF/classes/db/migration/V13__link_supervision_alert_scan_runs.sql" \
   "BOOT-INF/classes/db/migration/V14__align_opening_report_business_model.sql"; do
   "${jdk21_home}/bin/jar" tf "${demo_jar_path}" | grep -Fq "${demo_jar_entry}" \
@@ -916,15 +936,15 @@ verify_mock_mysql() {
   if [[ "${args}" == *"information_schema.SCHEMATA"* ]]; then
     printf '0\n'
   elif [[ "${args}" == *"FROM \`after_school_restore_verify\`.\`flyway_schema_history\`"* ]]; then
-    printf '16:0:%s\n' "${VERIFY_RESTORE_REQUIRED_VERSION_PRESENT:-1}"
+    printf '20:0:%s\n' "${VERIFY_RESTORE_REQUIRED_VERSION_PRESENT:-1}"
   elif [[ "${args}" == *"information_schema.referential_constraints"* ]]; then
-    printf '8\n'
+    printf '10\n'
   elif [[ "${args}" == *"table_name IN ("* && "${args}" == *"supervision_scan_run"* ]]; then
-    printf '17\n'
+    printf '19\n'
   elif [[ "${args}" == *"FROM \`after_school_restore_verify\`.\`supervision_alert\`"* ]]; then
     printf '0\n'
   elif [[ "${args}" == *"information_schema.tables"* ]]; then
-    printf '32\n'
+    printf '34\n'
   elif [[ "${args}" == *"--execute="* ]]; then
     return 0
   else
@@ -940,7 +960,7 @@ export BACKUP_DIR="${backup_test_dir}"
 export BACKUP_LOCK_FILE="${operations_test_root}/backup.lock"
 export MYSQL_DEFAULTS_FILE="${backup_credentials}"
 export AGE_RECIPIENTS_FILE="${backup_recipients}"
-export RESTORE_REQUIRED_FLYWAY_VERSION=14
+export RESTORE_REQUIRED_FLYWAY_VERSION=18
 "${backup_script}" >/dev/null
 backup_test_file="$(find "${backup_test_dir}" -maxdepth 1 -type f \
   -name '*.sql.gz.age' -print -quit)"
@@ -1102,7 +1122,7 @@ await_prod_guard_failure() {
   local guard_exited=false
   local guard_status=0
 
-  for _ in {1..40}; do
+  for _ in {1..120}; do
     if ! kill -0 "${prod_guard_pid}" >/dev/null 2>&1; then
       if wait "${prod_guard_pid}"; then
         guard_status=0
@@ -1118,7 +1138,7 @@ await_prod_guard_failure() {
   if [[ "${guard_exited}" != "true" ]]; then
     terminate_pid "${prod_guard_pid}" "${guard_name}"
     prod_guard_pid=""
-    fail "${guard_name} smoke test exceeded 10 seconds"
+    fail "${guard_name} smoke test exceeded 30 seconds"
   fi
   if [[ "${guard_status}" == "0" ]]; then
     fail "prod accepted ${guard_name}"
@@ -1210,18 +1230,28 @@ mysql_version="$(
 printf "[verify] MySQL: %s\n" "${mysql_version}"
 
 db_name="after_school_demo"
+upgrade_db_name="after_school_upgrade_verify"
 db_user="after_school_demo"
 db_password="Verify-Only-Db-Password-2026"
 "${mysql_client}" --no-defaults --protocol=socket --socket="${mysql_socket}" -uroot <<SQL
 CREATE DATABASE ${db_name} CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE DATABASE ${upgrade_db_name} CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 CREATE USER '${db_user}'@'127.0.0.1' IDENTIFIED BY '${db_password}';
 GRANT ALL PRIVILEGES ON ${db_name}.* TO '${db_user}'@'127.0.0.1';
+GRANT ALL PRIVILEGES ON ${upgrade_db_name}.* TO '${db_user}'@'127.0.0.1';
 FLUSH PRIVILEGES;
 SQL
 
 start_server() {
   local active_profile="${1:-demo}"
   local wait_for_demo_timeline="${2:-true}"
+  local target_db_name="${3:-${db_name}}"
+  local flyway_target="${4:-latest}"
+  local bootstrap_enabled="${5:-false}"
+  local demo_timeline_enabled="true"
+  if [[ "${flyway_target}" == "15" ]]; then
+    demo_timeline_enabled="false"
+  fi
   local active_profile_value=""
   local runtime_jar="${jar_path}"
   local inherited_db_url=""
@@ -1237,7 +1267,7 @@ start_server() {
     inherited_db_username="production_url_must_not_be_used"
     inherited_db_password="production-url-must-not-be-used"
   else
-    inherited_db_url="jdbc:mysql://127.0.0.1:${mysql_port}/${db_name}?useUnicode=true&characterEncoding=UTF-8&connectionTimeZone=%2B08%3A00&forceConnectionTimeZoneToSession=true&allowPublicKeyRetrieval=true&useSSL=false"
+    inherited_db_url="jdbc:mysql://127.0.0.1:${mysql_port}/${target_db_name}?useUnicode=true&characterEncoding=UTF-8&connectionTimeZone=%2B08%3A00&forceConnectionTimeZoneToSession=true&allowPublicKeyRetrieval=true&useSSL=false"
   fi
   : >"${run_root}/server.log"
   (
@@ -1265,8 +1295,18 @@ start_server() {
       DB_USERNAME="${inherited_db_username}" \
       DB_PASSWORD="${inherited_db_password}" \
       DEMO_MYSQL_PORT="${mysql_port}" \
+      DEMO_DB_NAME="${target_db_name}" \
       DEMO_DB_USERNAME="${db_user}" \
       DEMO_DB_PASSWORD="${db_password}" \
+      SPRING_FLYWAY_TARGET="${flyway_target}" \
+      APP_DEMO_TIMELINE_ENABLED="${demo_timeline_enabled}" \
+      APP_BOOTSTRAP_ENABLED="${bootstrap_enabled}" \
+      APP_BOOTSTRAP_USERNAME='initial_school_admin_verify' \
+      APP_BOOTSTRAP_PASSWORD='InitialSchoolAdminVerify@2026' \
+      APP_BOOTSTRAP_DISPLAY_NAME='初始验收教务管理员' \
+      APP_BOOTSTRAP_SCHOOL_CODE='BOOTSTRAP-VERIFY' \
+      APP_BOOTSTRAP_SCHOOL_NAME='生产初始化验收学校' \
+      APP_BOOTSTRAP_DISTRICT_CODE='VERIFY-DISTRICT' \
       SPRINGDOC_ENABLED=false \
       APP_CORS_ALLOWED_ORIGIN="http://127.0.0.1:${web_port}" \
       java -jar "${runtime_jar}"
@@ -1305,9 +1345,82 @@ stop_server() {
   server_pid=""
 }
 
-log_step "Migrating the fresh database through the production-only V14 schema"
+log_step "Proving a populated demo V15 database upgrades intact to V18"
 
-start_server default false
+start_server demo false "${upgrade_db_name}" 15
+upgrade_v15_history="$(
+  "${mysql_client}" --no-defaults --protocol=socket --socket="${mysql_socket}" \
+    -uroot --skip-column-names "${upgrade_db_name}" -e \
+    "SELECT CONCAT(MAX(CAST(version AS UNSIGNED)), ':', COUNT(*))
+     FROM flyway_schema_history WHERE success = 1"
+)"
+[[ "${upgrade_v15_history}" == "15:16" ]] \
+  || fail "expected a populated V15 demo database before upgrade: ${upgrade_v15_history}"
+upgrade_v15_receipt="$(
+  "${mysql_client}" --no-defaults --protocol=socket --socket="${mysql_socket}" \
+    -uroot --skip-column-names "${upgrade_db_name}" -e \
+    "SELECT CONCAT(
+       (SELECT COUNT(*) FROM school), ':',
+       (SELECT COUNT(*) FROM student), ':',
+       (SELECT COUNT(*) FROM enrollment), ':',
+       (SELECT COUNT(*) FROM operation_audit), ':',
+       (SELECT COUNT(*) FROM academic_term))"
+)"
+[[ "${upgrade_v15_receipt}" =~ ^2:[1-9][0-9]*:[1-9][0-9]*:[1-9][0-9]*:[1-9][0-9]*$ ]] \
+  || fail "V15 upgrade fixture was not populated: ${upgrade_v15_receipt}"
+stop_server
+
+start_server demo true "${upgrade_db_name}" latest
+upgrade_v18_history="$(
+  "${mysql_client}" --no-defaults --protocol=socket --socket="${mysql_socket}" \
+    -uroot --skip-column-names "${upgrade_db_name}" -e \
+    "SELECT MAX(CAST(version AS UNSIGNED))
+     FROM flyway_schema_history WHERE success = 1"
+)"
+[[ "${upgrade_v18_history}" == "21" ]] \
+  || fail "populated V15 database did not upgrade through the current demo schema"
+upgrade_retained_receipt="$(
+  "${mysql_client}" --no-defaults --protocol=socket --socket="${mysql_socket}" \
+    -uroot --skip-column-names "${upgrade_db_name}" -e \
+    "SELECT CONCAT(
+       (SELECT COUNT(*) FROM school), ':',
+       (SELECT COUNT(*) FROM student), ':',
+       (SELECT COUNT(*) FROM enrollment), ':',
+       (SELECT COUNT(*) FROM operation_audit), ':',
+       (SELECT COUNT(*) FROM academic_term WHERE school_id IS NOT NULL), ':',
+       (SELECT COUNT(*) FROM student_grade))"
+)"
+IFS=: read -r upgrade_school_count upgrade_student_count \
+  upgrade_enrollment_count upgrade_audit_count upgrade_term_count \
+  upgrade_grade_count <<<"${upgrade_retained_receipt}"
+IFS=: read -r v15_school_count v15_student_count v15_enrollment_count \
+  v15_audit_count v15_term_count <<<"${upgrade_v15_receipt}"
+[[ "${upgrade_school_count}" -eq "${v15_school_count}" \
+    && "${upgrade_student_count}" -ge "${v15_student_count}" \
+    && "${upgrade_enrollment_count}" -ge "${v15_enrollment_count}" \
+    && "${upgrade_audit_count}" -ge "${v15_audit_count}" \
+    && "${upgrade_term_count}" -ge "${v15_term_count}" \
+    && "${upgrade_grade_count}" -ge 1 ]] \
+  || fail "V15 business data was not retained by the V18/V21 upgrade"
+upgrade_scoped_term_receipt="$(
+  "${mysql_client}" --no-defaults --protocol=socket --socket="${mysql_socket}" \
+    -uroot --skip-column-names "${upgrade_db_name}" -e \
+    "SELECT CONCAT(
+         COUNT(DISTINCT plan.term_id), ':',
+         COUNT(DISTINCT term.term_code), ':',
+         SUM(plan.school_id <> term.school_id)
+     )
+     FROM school_service_plan plan
+     JOIN academic_term term ON term.id = plan.term_id
+     WHERE plan.id IN (1, 2)"
+)"
+[[ "${upgrade_scoped_term_receipt}" == "2:1:0" ]] \
+  || fail "V15 shared academic terms were not split by school during upgrade"
+stop_server
+
+log_step "Migrating the fresh database through the production-only V18 schema"
+
+start_server default false "${db_name}" latest true
 production_history="$(
   "${mysql_client}" --no-defaults --protocol=socket --socket="${mysql_socket}" \
     -uroot --skip-column-names "${db_name}" -e \
@@ -1319,8 +1432,8 @@ production_history="$(
      FROM flyway_schema_history
      WHERE success = 1"
 )"
-[[ "${production_history}" == "11:0:14" ]] \
-  || fail "default profile did not stop at the production-only V14 schema: ${production_history}"
+[[ "${production_history}" == "14:0:18" ]] \
+  || fail "default profile did not stop at the production-only V18 schema: ${production_history}"
 production_demo_users="$(
   "${mysql_client}" --no-defaults --protocol=socket --socket="${mysql_socket}" \
     -uroot --skip-column-names "${db_name}" -e \
@@ -1329,10 +1442,46 @@ production_demo_users="$(
 )"
 [[ "${production_demo_users}" == "0" ]] \
   || fail "default profile unexpectedly inserted demo accounts"
+production_bootstrap_receipt="$(
+  "${mysql_client}" --no-defaults --protocol=socket --socket="${mysql_socket}" \
+    -uroot --skip-column-names "${db_name}" -e \
+    "SELECT CONCAT(
+         school.school_code, ':', role.role_code, ':',
+         user_account.enabled, ':', role.enabled
+     )
+     FROM sys_user user_account
+     JOIN school ON school.id = user_account.school_id
+     JOIN sys_role role ON role.id = user_account.role_id
+     WHERE user_account.username = 'initial_school_admin_verify'"
+)"
+[[ "${production_bootstrap_receipt}" == "BOOTSTRAP-VERIFY:SCHOOL_ADMIN:1:1" ]] \
+  || fail "empty production database bootstrap did not create an active school admin"
+prod_base_url="http://127.0.0.1:${server_port}/api"
+bootstrap_cookie_jar="${run_root}/bootstrap-admin.cookies"
+curl --noproxy '*' -fsS -c "${bootstrap_cookie_jar}" -b "${bootstrap_cookie_jar}" \
+  "${prod_base_url}/public/csrf" >"${run_root}/bootstrap-csrf.json"
+bootstrap_csrf_token="$(
+  awk '$6 == "XSRF-TOKEN" { value = $7 } END { print value }' \
+    "${bootstrap_cookie_jar}"
+)"
+bootstrap_login_status="$(
+  curl --noproxy '*' -sS -o "${run_root}/bootstrap-login.json" -w '%{http_code}' \
+    -c "${bootstrap_cookie_jar}" -b "${bootstrap_cookie_jar}" \
+    -X POST -H 'Content-Type: application/json' \
+    -H "X-XSRF-TOKEN: ${bootstrap_csrf_token}" \
+    --data-binary '{"username":"initial_school_admin_verify","password":"InitialSchoolAdminVerify@2026","expectedRole":"SCHOOL_ADMIN"}' \
+    "${prod_base_url}/auth/login"
+)"
+[[ "${bootstrap_login_status}" == "200" ]] \
+  || fail "bootstrapped production school admin could not log in"
+jq -e '.role == "SCHOOL_ADMIN" and .schoolId != null' \
+  "${run_root}/bootstrap-login.json" >/dev/null \
+  || fail "bootstrapped production account received the wrong role or scope"
 stop_server
 
-log_step "Switching the existing V14 schema to the real demo profile"
+log_step "Continuing with the populated demo database upgraded from V15"
 
+db_name="${upgrade_db_name}"
 start_server
 base_url="http://127.0.0.1:${server_port}/api"
 curl --noproxy '*' -fsS "${base_url}/public/system-info" \
@@ -1343,13 +1492,13 @@ table_count="$(
     -uroot --skip-column-names -e \
     "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${db_name}' AND table_name != 'flyway_schema_history'"
 )"
-[[ "${table_count}" == "32" ]] || fail "expected 32 domain tables, found ${table_count}"
+[[ "${table_count}" == "34" ]] || fail "expected 34 domain tables, found ${table_count}"
 migration_count="$(
   "${mysql_client}" --no-defaults --protocol=socket --socket="${mysql_socket}" \
     -uroot --skip-column-names "${db_name}" -e \
     "SELECT COUNT(*) FROM flyway_schema_history WHERE success = 1"
 )"
-[[ "${migration_count}" == "16" ]] || fail "expected 16 successful Flyway migrations"
+[[ "${migration_count}" == "21" ]] || fail "expected 21 successful Flyway migrations"
 scan_run_fk_count="$(
   "${mysql_client}" --no-defaults --protocol=socket --socket="${mysql_socket}" \
     -uroot --skip-column-names "${db_name}" -e \
@@ -1485,10 +1634,15 @@ upload_api() {
 
 assert_xlsx() {
   local file_path="$1"
+  local min_data_rows="${2:-0}"
+  local expected_header="${3:-}"
   [[ -s "${file_path}" ]] || fail "Excel file is empty: ${file_path}"
-  "${jdk21_home}/bin/jar" tf "${file_path}" \
-    | grep -Fq 'xl/workbook.xml' \
-    || fail "download is not a valid XLSX workbook: ${file_path}"
+  local verifier_args=("${file_path}" --min-data-rows "${min_data_rows}")
+  if [[ -n "${expected_header}" ]]; then
+    verifier_args+=(--expect-header "${expected_header}")
+  fi
+  "${jdk21_home}/bin/java" "${verify_xlsx_script}" "${verifier_args[@]}" >/dev/null \
+    || fail "independent XLSX parsing failed: ${file_path}"
 }
 
 login_as() {
@@ -1499,7 +1653,8 @@ login_as() {
   local output_file="${run_root}/login-${username}.json"
   local body
   body="$(jq -nc --arg username "${username}" --arg password "${password}" \
-    '{username:$username,password:$password}')"
+    --arg expectedRole "${expected_role}" \
+    '{username:$username,password:$password,expectedRole:$expectedRole}')"
   write_api 200 POST /auth/login "${cookie_jar}" "${body}" "${output_file}"
   jq -e --arg role "${expected_role}" '.role == $role' "${output_file}" >/dev/null \
     || fail "${username} did not receive role ${expected_role}"
@@ -1511,14 +1666,36 @@ login_as() {
 
 log_step "Verifying authentication, CSRF, CORS and four-role data scopes"
 
+active_roles="$(
+  "${mysql_client}" --no-defaults --protocol=socket --socket="${mysql_socket}" \
+    -uroot --skip-column-names "${db_name}" -e \
+    "SELECT GROUP_CONCAT(role_code ORDER BY role_code SEPARATOR ',')
+     FROM sys_role WHERE enabled = TRUE"
+)"
+[[ "${active_roles}" == "GUARDIAN,SCHOOL_ADMIN,STUDENT,TEACHER" ]] \
+  || fail "active roles are not exactly the four opening-report roles: ${active_roles}"
+if grep -Eq "path:[[:space:]]*'/regulator'|roles:[[:space:]]*\['REGULATOR'\]" \
+    "${web_dir}/src/router/index.ts"; then
+  fail "frontend router still exposes a regulator role route"
+fi
+
 unauth_status="$(status_of "${run_root}/unauth.json" "${base_url}/auth/me")"
 [[ "${unauth_status}" == "401" ]] || fail "unauthenticated /auth/me must return 401"
 
 bad_jar="${run_root}/bad.cookies"
-bad_body='{"username":"admin","password":"wrong-password"}'
+bad_body='{"username":"admin","password":"wrong-password","expectedRole":"SCHOOL_ADMIN"}'
 write_api 401 POST /auth/login "${bad_jar}" "${bad_body}" "${run_root}/bad-login.json"
 jq -e '.code == "INVALID_CREDENTIALS"' "${run_root}/bad-login.json" >/dev/null \
   || fail "bad credentials error contract failed"
+
+disabled_regulator_body="$(jq -nc --arg password "${demo_password}" \
+  '{username:"admin",password:$password,expectedRole:"SCHOOL_ADMIN"}')"
+write_api 401 POST /auth/login "${bad_jar}" "${disabled_regulator_body}" \
+  "${run_root}/disabled-regulator-login.json"
+invalid_fifth_role_body="$(jq -nc --arg password "${demo_password}" \
+  '{username:"admin",password:$password,expectedRole:"REGULATOR"}')"
+write_api 400 POST /auth/login "${bad_jar}" "${invalid_fifth_role_body}" \
+  "${run_root}/invalid-fifth-role-login.json"
 
 csrf_missing_status="$(
   status_of "${run_root}/csrf-missing.json" \
@@ -1548,10 +1725,13 @@ if grep -Fiq 'Access-Control-Allow-Origin: https://malicious.invalid' <<<"${bloc
 fi
 
 admin_jar="${run_root}/admin.cookies"
+second_admin_jar="${run_root}/second-admin.cookies"
 parent_jar="${run_root}/parent.cookies"
 teacher_jar="${run_root}/teacher.cookies"
-regulator_jar="${run_root}/regulator.cookies"
+student_one_jar="${run_root}/student-one.cookies"
+student_two_jar="${run_root}/student-two.cookies"
 login_as school_admin SCHOOL_ADMIN "${admin_jar}"
+login_as school_admin_2 SCHOOL_ADMIN "${second_admin_jar}"
 
 login_wall_clock_delta="$(
   "${mysql_client}" --no-defaults --protocol=socket --socket="${mysql_socket}" \
@@ -1583,7 +1763,7 @@ write_api 201 POST /teachers "${admin_jar}" "${teacher_body}" "${run_root}/creat
 verify_teacher_id="$(jq -r '.id' "${run_root}/created-teacher.json")"
 
 student_body="$(jq -nc --argjson classId "${class_id}" \
-  '{schoolId:1,classId:$classId,studentNo:"S-VERIFY-001",fullName:"验收学生",gender:"FEMALE",dateOfBirth:"2015-08-08",status:"ACTIVE"}')"
+  '{schoolId:1,classId:$classId,studentNo:"S-VERIFY-001",fullName:"验收学生",username:"verify_student",password:"VerifyStudent@2026",gender:"FEMALE",dateOfBirth:"2015-08-08",status:"ACTIVE"}')"
 write_api 201 POST /students "${admin_jar}" "${student_body}" "${run_root}/created-student.json"
 verify_student_id="$(jq -r '.id' "${run_root}/created-student.json")"
 
@@ -1622,19 +1802,42 @@ read -r rule_year rule_start_date rule_end_date \
   rule_enrollment_start rule_enrollment_end rule_future_enrollment_start \
   <<<"${rule_dates}"
 rule_term="VERIFY-${rule_year}"
-login_as admin REGULATOR "${regulator_jar}"
 strict_term_body="$(jq -nc \
   --arg termCode "${rule_term}" \
   --arg termName "${rule_year} 验收学期" \
   --arg startDate "${rule_start_date}" \
   --arg endDate "${rule_end_date}" \
   '{termCode:$termCode,termName:$termName,startDate:$startDate,endDate:$endDate,status:"DRAFT"}')"
-write_api 201 POST /terms "${regulator_jar}" "${strict_term_body}" \
+write_api 201 POST /terms "${admin_jar}" "${strict_term_body}" \
   "${run_root}/strict-term-draft.json"
 strict_term_id="$(jq -r '.id // empty' "${run_root}/strict-term-draft.json")"
 strict_term_body="$(jq '.status = "ACTIVE"' <<<"${strict_term_body}")"
-write_api 200 PUT "/terms/${strict_term_id}" "${regulator_jar}" \
+write_api 200 PUT "/terms/${strict_term_id}" "${admin_jar}" \
   "${strict_term_body}" "${run_root}/strict-term-active.json"
+
+strict_term_school_two_body="$(jq '.status = "DRAFT" | .termName = "第二学校同码验收学期"' \
+  <<<"${strict_term_body}")"
+write_api 201 POST /terms "${second_admin_jar}" \
+  "${strict_term_school_two_body}" "${run_root}/strict-term-school-two.json"
+strict_term_school_two_id="$(jq -r '.id // empty' \
+  "${run_root}/strict-term-school-two.json")"
+[[ "${strict_term_school_two_id}" =~ ^[0-9]+$ \
+    && "${strict_term_school_two_id}" != "${strict_term_id}" ]] \
+  || fail "same term code was not independently created for the second school"
+write_api 404 PUT "/terms/${strict_term_id}" "${second_admin_jar}" \
+  "${strict_term_school_two_body}" "${run_root}/cross-school-term-update.json"
+second_school_terms_status="$(
+  status_of "${run_root}/second-school-terms.json" \
+    -c "${second_admin_jar}" -b "${second_admin_jar}" "${base_url}/terms"
+)"
+[[ "${second_school_terms_status}" == "200" ]] \
+  || fail "second school admin could not list own terms"
+jq -e --argjson ownId "${strict_term_school_two_id}" \
+  --argjson foreignId "${strict_term_id}" \
+  'any(.[]; .id == $ownId and .schoolId == 2)
+   and all(.id != $foreignId and .schoolId == 2)' \
+  "${run_root}/second-school-terms.json" >/dev/null \
+  || fail "academic term listing leaked another school"
 
 strict_plan_body="$(jq -nc --argjson termId "${strict_term_id}" \
   '{schoolId:1,termId:$termId,planCode:"PLAN-VERIFY-STRICT",planName:"开题报告严格验收计划",description:"包含课程类型、开班规模和师资配置"}')"
@@ -1646,9 +1849,9 @@ write_api 201 POST "/service-plans/${strict_plan_id}/items" "${admin_jar}" \
   "${strict_plan_item_body}" "${run_root}/strict-plan-item.json"
 write_api 200 POST "/service-plans/${strict_plan_id}/transitions" "${admin_jar}" \
   '{"targetStatus":"SUBMITTED"}' "${run_root}/strict-plan-submitted.json"
-write_api 200 POST "/service-plans/${strict_plan_id}/transitions" "${regulator_jar}" \
+write_api 200 POST "/service-plans/${strict_plan_id}/transitions" "${admin_jar}" \
   '{"targetStatus":"FILED"}' "${run_root}/strict-plan-filed.json"
-write_api 200 POST "/service-plans/${strict_plan_id}/transitions" "${regulator_jar}" \
+write_api 200 POST "/service-plans/${strict_plan_id}/transitions" "${admin_jar}" \
   '{"targetStatus":"ACTIVE"}' "${run_root}/strict-plan-active.json"
 [[ "${strict_term_id}" =~ ^[0-9]+$ && "${strict_plan_id}" =~ ^[0-9]+$ ]] \
   || fail "strict opening-report term and filed plan were not created"
@@ -1819,6 +2022,8 @@ jq -e '.status == "PUBLISHED"' "${run_root}/attendance-offering.json" >/dev/null
   || fail "attendance draft offering did not transition to PUBLISHED"
 
 login_as parent_chen GUARDIAN "${parent_jar}"
+login_as student_chen_he STUDENT "${student_one_jar}"
+login_as student_chen_shu STUDENT "${student_two_jar}"
 parent_students_status="$(
   status_of "${run_root}/parent-students.json" \
     -c "${parent_jar}" -b "${parent_jar}" "${base_url}/guardian/students"
@@ -1829,32 +2034,32 @@ jq -e 'length == 2 and all(.id == 1 or .id == 2)' "${run_root}/parent-students.j
 
 enroll_body="$(jq -nc --argjson offeringId "${base_offering_id}" \
   '{studentId:1,offeringId:$offeringId}')"
-write_api 201 POST /enrollments "${parent_jar}" "${enroll_body}" "${run_root}/enrolled.json"
-write_api 409 POST /enrollments "${parent_jar}" "${enroll_body}" "${run_root}/duplicate.json"
+write_api 201 POST /enrollments "${student_one_jar}" "${enroll_body}" "${run_root}/enrolled.json"
+write_api 409 POST /enrollments "${student_one_jar}" "${enroll_body}" "${run_root}/duplicate.json"
 jq -e '.code == "ALREADY_ENROLLED"' "${run_root}/duplicate.json" >/dev/null \
   || fail "duplicate enrollment rule failed"
 
 grade_body="$(jq -nc --argjson offeringId "${grade_offering_id}" \
   '{studentId:1,offeringId:$offeringId}')"
-write_api 409 POST /enrollments "${parent_jar}" "${grade_body}" "${run_root}/grade-reject.json"
+write_api 409 POST /enrollments "${student_one_jar}" "${grade_body}" "${run_root}/grade-reject.json"
 jq -e '.code == "GRADE_NOT_ELIGIBLE"' "${run_root}/grade-reject.json" >/dev/null \
   || fail "grade enrollment rule failed"
 
 future_body="$(jq -nc --argjson offeringId "${future_offering_id}" \
   '{studentId:1,offeringId:$offeringId}')"
-write_api 409 POST /enrollments "${parent_jar}" "${future_body}" "${run_root}/time-reject.json"
+write_api 409 POST /enrollments "${student_one_jar}" "${future_body}" "${run_root}/time-reject.json"
 jq -e '.code == "OUTSIDE_ENROLLMENT_WINDOW"' "${run_root}/time-reject.json" >/dev/null \
   || fail "enrollment-window rule failed"
 
 conflict_body="$(jq -nc --argjson offeringId "${conflict_offering_id}" \
   '{studentId:1,offeringId:$offeringId}')"
-write_api 409 POST /enrollments "${parent_jar}" "${conflict_body}" "${run_root}/conflict-reject.json"
+write_api 409 POST /enrollments "${student_one_jar}" "${conflict_body}" "${run_root}/conflict-reject.json"
 jq -e '.code == "STUDENT_SCHEDULE_CONFLICT"' "${run_root}/conflict-reject.json" >/dev/null \
   || fail "student schedule-conflict rule failed"
 
 not_bound_body="$(jq -nc --argjson offeringId "${base_offering_id}" \
   '{studentId:3,offeringId:$offeringId}')"
-write_api 404 POST /enrollments "${parent_jar}" "${not_bound_body}" "${run_root}/not-bound.json"
+write_api 403 POST /enrollments "${student_one_jar}" "${not_bound_body}" "${run_root}/not-bound.json"
 
 for student_id in 1 2; do
   attendance_enrollment_body="$(
@@ -1863,32 +2068,35 @@ for student_id in 1 2; do
       --argjson offeringId "${attendance_offering_id}" \
       '{studentId:$studentId,offeringId:$offeringId}'
   )"
-  write_api 201 POST /enrollments "${parent_jar}" \
+  enrollment_cookie="${student_one_jar}"
+  [[ "${student_id}" == "2" ]] && enrollment_cookie="${student_two_jar}"
+  write_api 201 POST /enrollments "${enrollment_cookie}" \
     "${attendance_enrollment_body}" \
     "${run_root}/attendance-enrollment-${student_id}.json"
 done
 
 log_step "Verifying concurrent capacity protection"
 
-capacity_token="$(csrf_for "${parent_jar}")"
+capacity_token_one="$(csrf_for "${student_one_jar}")"
+capacity_token_two="$(csrf_for "${student_two_jar}")"
 capacity_body_1="$(jq -nc --argjson offeringId "${capacity_offering_id}" \
   '{studentId:1,offeringId:$offeringId}')"
 capacity_body_2="$(jq -nc --argjson offeringId "${capacity_offering_id}" \
   '{studentId:2,offeringId:$offeringId}')"
 (
   curl --noproxy '*' -sS -o "${run_root}/capacity-1.json" \
-    -w '%{http_code}' -b "${parent_jar}" \
+    -w '%{http_code}' -b "${student_one_jar}" \
     -X POST -H 'Content-Type: application/json' \
-    -H "X-XSRF-TOKEN: ${capacity_token}" \
+    -H "X-XSRF-TOKEN: ${capacity_token_one}" \
     --data-binary "${capacity_body_1}" \
     "${base_url}/enrollments" >"${run_root}/capacity-1.status"
 ) &
 capacity_pid_1="$!"
 (
   curl --noproxy '*' -sS -o "${run_root}/capacity-2.json" \
-    -w '%{http_code}' -b "${parent_jar}" \
+    -w '%{http_code}' -b "${student_two_jar}" \
     -X POST -H 'Content-Type: application/json' \
-    -H "X-XSRF-TOKEN: ${capacity_token}" \
+    -H "X-XSRF-TOKEN: ${capacity_token_two}" \
     --data-binary "${capacity_body_2}" \
     "${base_url}/enrollments" >"${run_root}/capacity-2.status"
 ) &
@@ -1964,11 +2172,11 @@ race_term_b_body="$(jq -nc \
   --arg startDate "${rule_start_date}" \
   --arg endDate "${rule_end_date}" \
   '{termCode:$termCode,termName:"并发调课验收学期 B",startDate:$startDate,endDate:$endDate,status:"DRAFT"}')"
-write_api 201 POST /terms "${regulator_jar}" "${race_term_b_body}" \
+write_api 201 POST /terms "${admin_jar}" "${race_term_b_body}" \
   "${run_root}/race-term-b-draft.json"
 race_term_b_id="$(jq -r '.id // empty' "${run_root}/race-term-b-draft.json")"
 race_term_b_body="$(jq '.status = "ACTIVE"' <<<"${race_term_b_body}")"
-write_api 200 PUT "/terms/${race_term_b_id}" "${regulator_jar}" \
+write_api 200 PUT "/terms/${race_term_b_id}" "${admin_jar}" \
   "${race_term_b_body}" "${run_root}/race-term-b.json"
 race_plan_b_body="$(jq -nc --argjson termId "${race_term_b_id}" \
   '{schoolId:1,termId:$termId,planCode:"PLAN-VERIFY-RACE-B",planName:"并发调课验收计划 B",description:"与计划 A 仅共享学生，不共享学期锁"}')"
@@ -1980,9 +2188,9 @@ write_api 201 POST "/service-plans/${race_plan_b_id}/items" "${admin_jar}" \
   "${run_root}/race-plan-b-item.json"
 write_api 200 POST "/service-plans/${race_plan_b_id}/transitions" "${admin_jar}" \
   '{"targetStatus":"SUBMITTED"}' "${run_root}/race-plan-b-submitted.json"
-write_api 200 POST "/service-plans/${race_plan_b_id}/transitions" "${regulator_jar}" \
+write_api 200 POST "/service-plans/${race_plan_b_id}/transitions" "${admin_jar}" \
   '{"targetStatus":"FILED"}' "${run_root}/race-plan-b-filed.json"
-write_api 200 POST "/service-plans/${race_plan_b_id}/transitions" "${regulator_jar}" \
+write_api 200 POST "/service-plans/${race_plan_b_id}/transitions" "${admin_jar}" \
   '{"targetStatus":"ACTIVE"}' "${run_root}/race-plan-b-active.json"
 
 create_offering O-VERIFY-RACE-A "${race_teacher_a_id}" 1 "${course_id}" 20 \
@@ -2003,7 +2211,7 @@ for race_offering_id in "${race_offering_a_id}" "${race_offering_b_id}"; do
       --argjson offeringId "${race_offering_id}" \
       '{studentId:$studentId,offeringId:$offeringId}'
   )"
-  write_api 201 POST /enrollments "${parent_jar}" "${race_enrollment_body}" \
+  write_api 201 POST /enrollments "${student_two_jar}" "${race_enrollment_body}" \
     "${run_root}/race-enrollment-${race_offering_id}.json"
 done
 
@@ -2012,9 +2220,9 @@ race_teacher_b_jar="${run_root}/race-teacher-b.cookies"
 login_as verify_race_teacher_a TEACHER "${race_teacher_a_jar}" "VerifyRaceTeacherA@2026"
 login_as verify_race_teacher_b TEACHER "${race_teacher_b_jar}" "VerifyRaceTeacherB@2026"
 write_api 200 POST "/offerings/${race_offering_a_id}/sessions/generate" \
-  "${race_teacher_a_jar}" '{}' "${run_root}/race-sessions-a.json"
+  "${admin_jar}" '{}' "${run_root}/race-sessions-a.json"
 write_api 200 POST "/offerings/${race_offering_b_id}/sessions/generate" \
-  "${race_teacher_b_jar}" '{}' "${run_root}/race-sessions-b.json"
+  "${admin_jar}" '{}' "${run_root}/race-sessions-b.json"
 race_session_a_id="$(jq -r '.[0].id // empty' "${run_root}/race-sessions-a.json")"
 race_session_b_id="$(jq -r '.[0].id // empty' "${run_root}/race-sessions-b.json")"
 [[ "${race_session_a_id}" =~ ^[0-9]+$ && "${race_session_b_id}" =~ ^[0-9]+$ ]] \
@@ -2210,7 +2418,7 @@ race_applied_adjustment_count="$(
   || fail "concurrent reschedule persisted an invalid target state"
 
 write_api 200 POST "/offerings/${attendance_offering_id}/sessions/generate" \
-  "${teacher_jar}" '{}' \
+  "${admin_jar}" '{}' \
   "${run_root}/sessions.json"
 session_id="$(jq -r '.[0].id' "${run_root}/sessions.json")"
 [[ "${session_id}" =~ ^[0-9]+$ ]] || fail "session generation returned no session"
@@ -2228,63 +2436,24 @@ attendance_status="$(
 )"
 [[ "${attendance_status}" == "200" ]] || fail "teacher could not load attendance"
 
-log_step "Verifying the complete school rectification workflow"
+log_step "Verifying teacher-only classroom and attendance writes"
 
-login_as admin REGULATOR "${regulator_jar}"
-regulator_account_body='{"username":"verify_regulator","displayName":"验收监管员","mobile":"13800000920","password":"VerifyRegulator@2026","enabled":true,"schoolIds":[1,2]}'
-write_api 201 POST /regulators "${regulator_jar}" "${regulator_account_body}" \
-  "${run_root}/created-regulator.json"
-created_regulator_id="$(jq -r '.id // empty' "${run_root}/created-regulator.json")"
-[[ "${created_regulator_id}" =~ ^[0-9]+$ ]] \
-  || fail "regulator account registration returned no id"
-write_api 200 POST /supervision/alerts/scan "${regulator_jar}" \
-  '{"schoolId":1,"lowAttendanceThreshold":0.8,"deadlineDays":7}' \
-  "${run_root}/overdue-supervision-scan.json"
-jq -e '.candidateCount >= 2 and .createdCount >= 1' \
-  "${run_root}/overdue-supervision-scan.json" >/dev/null \
-  || fail "overdue-attendance scan did not create the expected alert"
-open_alerts_status="$(
-  status_of "${run_root}/open-supervision-alerts.json" \
-    -c "${regulator_jar}" -b "${regulator_jar}" \
-    "${base_url}/supervision/alerts?schoolId=1&status=OPEN"
-)"
-[[ "${open_alerts_status}" == "200" ]] || fail "regulator could not list open alerts"
-notification_status="$(
-  status_of "${run_root}/regulator-notifications.json" \
-    -c "${regulator_jar}" -b "${regulator_jar}" \
-    "${base_url}/regulator/notifications?unreadOnly=true"
-)"
-[[ "${notification_status}" == "200" ]] \
-  || fail "regulator could not read assigned in-app notifications"
-jq -e 'length >= 1 and all(.schoolId == 1 or .schoolId == 2)' \
-  "${run_root}/regulator-notifications.json" >/dev/null \
-  || fail "regulator notification delivery did not honor assigned schools"
-workflow_alert_id="$(
-  jq -r --argjson sessionId "${session_id}" \
-    '[.[] | select(
-      .alertType == "MISSING_ATTENDANCE"
-      and .sessionId == $sessionId
-    )][0].id // empty' \
-    "${run_root}/open-supervision-alerts.json"
-)"
-[[ "${workflow_alert_id}" =~ ^[0-9]+$ ]] \
-  || fail "scan did not return an open alert for the overdue attendance session"
-notice_body='{"title":"考勤缺失整改通知","requirements":"补录完整考勤并上传签到佐证材料","dueAt":"2099-12-31T18:00:00"}'
-write_api 200 POST "/rectifications/alerts/${workflow_alert_id}/notice" \
-  "${regulator_jar}" "${notice_body}" "${run_root}/rectification-notice.json"
-write_api 200 POST "/supervision/alerts/${workflow_alert_id}/transition" \
-  "${admin_jar}" \
-  '{"targetStatus":"ACKNOWLEDGED","comment":"学校已接收预警并核对课次名单"}' \
-  "${run_root}/workflow-alert-acknowledged.json"
-write_api 200 POST "/supervision/alerts/${workflow_alert_id}/transition" \
-  "${admin_jar}" \
-  '{"targetStatus":"RECTIFYING","comment":"已安排任课教师补录完整考勤"}' \
-  "${run_root}/workflow-alert-rectifying.json"
+write_api 200 PUT "/sessions/${session_id}" "${teacher_jar}" \
+  '{"status":"CANCELED","notes":"教师课堂记录"}' \
+  "${run_root}/teacher-session-note.json"
+jq -e '.status == "SCHEDULED" and .notes == "教师课堂记录"' \
+  "${run_root}/teacher-session-note.json" >/dev/null \
+  || fail "teacher session note update changed the schedule-owned status"
+write_api 403 PUT "/sessions/${session_id}" "${admin_jar}" \
+  '{"notes":"教务越权课堂记录"}' \
+  "${run_root}/admin-session-write-forbidden.json"
 
 attendance_body="$(
   jq -c '{records: map({studentId:.studentId,status:"PRESENT",remark:"验收通过"})}' \
     "${run_root}/attendance-list.json"
 )"
+write_api 403 PUT "/sessions/${session_id}/attendance" "${admin_jar}" \
+  "${attendance_body}" "${run_root}/admin-attendance-forbidden.json"
 write_api 200 PUT "/sessions/${session_id}/attendance" "${teacher_jar}" \
   "${attendance_body}" "${run_root}/attendance-saved.json"
 jq -e 'length == 2 and all(.status == "PRESENT")' \
@@ -2301,58 +2470,6 @@ jq -e --arg month "${attendance_month}" \
   '.month == $month and .summary.totalCount >= 1 and (.records | length) >= 1' \
   "${run_root}/monthly-attendance.json" >/dev/null \
   || fail "monthly attendance aggregation is incomplete"
-printf '%s' '%PDF-1.7 verification evidence' >"${run_root}/rectification-evidence.pdf"
-upload_api 200 "/rectifications/alerts/${workflow_alert_id}/materials" \
-  "${admin_jar}" "${run_root}/rectification-evidence.pdf" "application/pdf" \
-  "${run_root}/rectification-material.json"
-jq -e '.originalName == "rectification-evidence.pdf" and .sha256 != null' \
-  "${run_root}/rectification-material.json" >/dev/null \
-  || fail "rectification material upload did not preserve metadata"
-write_api 200 POST "/supervision/alerts/${workflow_alert_id}/transition" \
-  "${admin_jar}" \
-  '{"targetStatus":"WAITING_VERIFY","comment":"考勤已补录，提交监管复核"}' \
-  "${run_root}/workflow-alert-waiting.json"
-write_api 200 POST "/supervision/alerts/${workflow_alert_id}/transition" \
-  "${regulator_jar}" \
-  '{"targetStatus":"RETURNED","comment":"请补充说明纸质签到表复核结果"}' \
-  "${run_root}/workflow-alert-returned.json"
-write_api 200 POST "/supervision/alerts/${workflow_alert_id}/transition" \
-  "${admin_jar}" \
-  '{"targetStatus":"RECTIFYING","comment":"已补充签到表复核说明"}' \
-  "${run_root}/workflow-alert-resumed.json"
-write_api 200 POST "/supervision/alerts/${workflow_alert_id}/transition" \
-  "${admin_jar}" \
-  '{"targetStatus":"WAITING_VERIFY","comment":"整改材料已补充，重新提交复核"}' \
-  "${run_root}/workflow-alert-resubmitted.json"
-write_api 200 POST "/supervision/alerts/${workflow_alert_id}/transition" \
-  "${regulator_jar}" \
-  '{"targetStatus":"CLOSED","comment":"整改证据完整，监管复核通过"}' \
-  "${run_root}/workflow-alert-closed.json"
-workflow_history_status="$(
-  status_of "${run_root}/workflow-alert-history.json" \
-    -c "${regulator_jar}" -b "${regulator_jar}" \
-    "${base_url}/supervision/alerts/${workflow_alert_id}/history"
-)"
-[[ "${workflow_history_status}" == "200" ]] \
-  || fail "regulator could not read the complete rectification history"
-jq -e '
-  map(.actionType) == [
-    "CREATE",
-    "ISSUE_NOTICE",
-    "ACKNOWLEDGE",
-    "START_RECTIFICATION",
-    "SUBMIT_MATERIAL",
-    "SUBMIT_VERIFICATION",
-    "RETURN_FOR_RECTIFICATION",
-    "RESUME_RECTIFICATION",
-    "SUBMIT_VERIFICATION",
-    "VERIFY_CLOSE"
-  ]
-  and .[2].actorRole == "SCHOOL_ADMIN"
-  and .[6].actorRole == "REGULATOR"
-  and .[-1].toStatus == "CLOSED"
-' "${run_root}/workflow-alert-history.json" >/dev/null \
-  || fail "school rectification history did not preserve the complete workflow"
 
 admin_cancel_id="$(jq -r '.id' "${run_root}/enrolled.json")"
 write_api 204 DELETE "/enrollments/${admin_cancel_id}" "${admin_jar}" '{}' \
@@ -2381,19 +2498,19 @@ jq -e 'map(.actionType) | index("ENROLL") != null and index("CANCEL") != null' \
 log_step "Verifying academic planning, resources, leave and correction workflows"
 
 invalid_term_body='{"termCode":"VERIFY-2098-INVALID","termName":"2098 非法初态验收学期","startDate":"2098-01-01","endDate":"2098-03-31","status":"ACTIVE"}'
-write_api 400 POST /terms "${regulator_jar}" "${invalid_term_body}" \
+write_api 400 POST /terms "${admin_jar}" "${invalid_term_body}" \
   "${run_root}/invalid-initial-term.json"
 jq -e '.code == "INITIAL_TERM_STATUS_INVALID"' \
   "${run_root}/invalid-initial-term.json" >/dev/null \
   || fail "new academic term must reject any initial status except DRAFT"
 
 term_body='{"termCode":"VERIFY-2098","termName":"2098 验收学期","startDate":"2098-01-01","endDate":"2098-03-31","status":"DRAFT"}'
-write_api 201 POST /terms "${regulator_jar}" "${term_body}" \
+write_api 201 POST /terms "${admin_jar}" "${term_body}" \
   "${run_root}/academic-term-draft.json"
 verify_term_id="$(jq -r '.id' "${run_root}/academic-term-draft.json")"
 [[ "${verify_term_id}" =~ ^[0-9]+$ ]] || fail "academic term creation returned no id"
 term_body="$(jq '.status = "ACTIVE"' <<<"${term_body}")"
-write_api 200 PUT "/terms/${verify_term_id}" "${regulator_jar}" "${term_body}" \
+write_api 200 PUT "/terms/${verify_term_id}" "${admin_jar}" "${term_body}" \
   "${run_root}/academic-term.json"
 jq -e '.status == "ACTIVE"' "${run_root}/academic-term.json" >/dev/null \
   || fail "draft academic term did not transition to ACTIVE"
@@ -2420,13 +2537,13 @@ write_api 200 POST "/service-plans/${verify_plan_id}/transitions" \
 jq -e '.status == "SUBMITTED"' "${run_root}/service-plan-submitted.json" >/dev/null \
   || fail "school could not submit service plan"
 write_api 200 POST "/service-plans/${verify_plan_id}/transitions" \
-  "${regulator_jar}" '{"targetStatus":"FILED"}' \
+  "${admin_jar}" '{"targetStatus":"FILED"}' \
   "${run_root}/service-plan-filed.json"
 write_api 200 POST "/service-plans/${verify_plan_id}/transitions" \
-  "${regulator_jar}" '{"targetStatus":"ACTIVE"}' \
+  "${admin_jar}" '{"targetStatus":"ACTIVE"}' \
   "${run_root}/service-plan-active.json"
 jq -e '.status == "ACTIVE"' "${run_root}/service-plan-active.json" >/dev/null \
-  || fail "regulator could not file and activate service plan"
+  || fail "school admin could not file and activate service plan"
 
 room_body='{"schoolId":1,"roomCode":"ROOM-VERIFY-2098","roomName":"验收综合教室","location":"验收楼 101","capacity":30,"status":"ACTIVE"}'
 write_api 201 POST /rooms "${admin_jar}" "${room_body}" \
@@ -2504,10 +2621,15 @@ planned_enrollment_body="$(
   jq -nc --argjson offeringId "${planned_offering_id}" \
     '{studentId:2,offeringId:$offeringId}'
 )"
-write_api 201 POST /enrollments "${parent_jar}" "${planned_enrollment_body}" \
+write_api 201 POST /enrollments "${student_two_jar}" "${planned_enrollment_body}" \
   "${run_root}/planned-enrollment.json"
+class_roster_status="$(status_of "${run_root}/class-enrollment-roster.xlsx" \
+  -c "${admin_jar}" -b "${admin_jar}" \
+  "${base_url}/enrollments/class-roster.xlsx?classId=2")"
+[[ "${class_roster_status}" == "200" ]] || fail "class roster Excel export failed"
+assert_xlsx "${run_root}/class-enrollment-roster.xlsx"
 write_api 200 POST "/offerings/${planned_offering_id}/sessions/generate" \
-  "${teacher_jar}" '{}' "${run_root}/planned-sessions.json"
+  "${admin_jar}" '{}' "${run_root}/planned-sessions.json"
 jq -e '
   length >= 2
   and all(.[]; (.sessionDate | tostring | startswith("2098-02-01") | not))
@@ -2545,7 +2667,7 @@ reschedule_adjustment_id="$(jq -r '.id // empty' "${run_root}/rescheduled-sessio
   || fail "session reschedule returned no schedule-adjustment id"
 
 write_api 200 POST "/offerings/${planned_offering_id}/sessions/generate" \
-  "${teacher_jar}" '{}' "${run_root}/planned-sessions-regenerated.json"
+  "${admin_jar}" '{}' "${run_root}/planned-sessions-regenerated.json"
 jq -e \
   --arg originalDate "${reschedule_original_date}" \
   'any(.[]; (.sessionDate | tostring | startswith("2098-01-06")))
@@ -2555,8 +2677,6 @@ jq -e \
 
 write_api 403 POST "/schedule-adjustments/${reschedule_adjustment_id}/revert" \
   "${teacher_jar}" '{}' "${run_root}/rescheduled-session-revert-teacher-forbidden.json"
-write_api 403 POST "/schedule-adjustments/${reschedule_adjustment_id}/revert" \
-  "${regulator_jar}" '{}' "${run_root}/rescheduled-session-revert-regulator-forbidden.json"
 
 write_api 200 POST "/schedule-adjustments/${reschedule_adjustment_id}/revert" \
   "${admin_jar}" '{}' "${run_root}/rescheduled-session-reverted.json"
@@ -2597,7 +2717,7 @@ withdraw_leave_body="$(
   jq -nc --argjson sessionId "${reschedule_session_id}" \
     '{sessionId:$sessionId,studentId:2,reason:"验收请假撤回申请"}'
 )"
-write_api 200 POST /leave-requests "${parent_jar}" "${withdraw_leave_body}" \
+write_api 200 POST /leave-requests "${student_two_jar}" "${withdraw_leave_body}" \
   "${run_root}/leave-withdraw-request.json"
 withdraw_leave_request_id="$(jq -r '.id // empty' "${run_root}/leave-withdraw-request.json")"
 [[ "${withdraw_leave_request_id}" =~ ^[0-9]+$ ]] \
@@ -2605,7 +2725,7 @@ withdraw_leave_request_id="$(jq -r '.id // empty' "${run_root}/leave-withdraw-re
 jq -e '.status == "PENDING"' "${run_root}/leave-withdraw-request.json" >/dev/null \
   || fail "guardian leave request was not pending before withdrawal"
 write_api 200 POST "/leave-requests/${withdraw_leave_request_id}/withdraw" \
-  "${parent_jar}" '{}' "${run_root}/leave-withdrawn.json"
+  "${student_two_jar}" '{}' "${run_root}/leave-withdrawn.json"
 jq -e '.status == "WITHDRAWN" and .withdrawnByName != null' \
   "${run_root}/leave-withdrawn.json" >/dev/null \
   || fail "guardian could not withdraw a pending leave request"
@@ -2614,9 +2734,12 @@ leave_body="$(
   jq -nc --argjson sessionId "${planned_session_id}" \
     '{sessionId:$sessionId,studentId:2,reason:"验收请假申请"}'
 )"
-write_api 200 POST /leave-requests "${parent_jar}" "${leave_body}" \
+write_api 200 POST /leave-requests "${student_two_jar}" "${leave_body}" \
   "${run_root}/leave-request.json"
 leave_request_id="$(jq -r '.id' "${run_root}/leave-request.json")"
+write_api 403 PUT "/leave-requests/${leave_request_id}/review" \
+  "${admin_jar}" '{"decision":"APPROVED","remark":"教务越权审批"}' \
+  "${run_root}/admin-leave-review-forbidden.json"
 write_api 200 PUT "/leave-requests/${leave_request_id}/review" \
   "${teacher_jar}" '{"decision":"APPROVED","remark":"验收审批通过"}' \
   "${run_root}/leave-approved.json"
@@ -2696,6 +2819,91 @@ jq -e \
   "${run_root}/attendance-revisions.json" >/dev/null \
   || fail "attendance revision history is incomplete"
 
+grade_body="$(jq -nc --argjson offeringId "${attendance_offering_id}" \
+  '{offeringId:$offeringId,studentId:2,score:88,learningEvaluation:"课堂参与稳定"}')"
+write_api 200 PUT /grades "${teacher_jar}" "${grade_body}" \
+  "${run_root}/grade-created.json"
+grade_id="$(jq -r '.id // empty' "${run_root}/grade-created.json")"
+[[ "${grade_id}" =~ ^[0-9]+$ ]] || fail "teacher grade creation returned no id"
+grade_body="$(jq '.score = 92 | .learningEvaluation = "课堂参与积极，任务完成完整"' \
+  <<<"${grade_body}")"
+write_api 200 PUT /grades "${teacher_jar}" "${grade_body}" \
+  "${run_root}/grade-updated.json"
+jq -e '.score == 92 and .learningEvaluation == "课堂参与积极，任务完成完整"' \
+  "${run_root}/grade-updated.json" >/dev/null \
+  || fail "teacher could not update student grade and learning evaluation"
+student_grade_status="$(status_of "${run_root}/student-grades.json" \
+  -c "${student_two_jar}" -b "${student_two_jar}" "${base_url}/grades")"
+[[ "${student_grade_status}" == "200" ]] \
+  || fail "student could not read own grade"
+jq -e --argjson id "${grade_id}" 'any(.[]; .id == $id and .score == 92)' \
+  "${run_root}/student-grades.json" >/dev/null \
+  || fail "student grade scope or value is incorrect"
+parent_grade_status="$(status_of "${run_root}/parent-grades.json" \
+  -c "${parent_jar}" -b "${parent_jar}" "${base_url}/grades")"
+[[ "${parent_grade_status}" == "200" ]] \
+  || fail "guardian could not read bound student's grade"
+jq -e --argjson id "${grade_id}" 'any(.[]; .id == $id and .studentId == 2)' \
+  "${run_root}/parent-grades.json" >/dev/null \
+  || fail "guardian grade scope is incorrect"
+grade_revision_status="$(status_of "${run_root}/grade-revisions.json" \
+  -c "${admin_jar}" -b "${admin_jar}" \
+  "${base_url}/grades/${grade_id}/revisions")"
+[[ "${grade_revision_status}" == "200" ]] \
+  || fail "academic administrator could not read grade revision history"
+jq -e 'length == 1 and .[0].oldScore == 88 and .[0].newScore == 92' \
+  "${run_root}/grade-revisions.json" >/dev/null \
+  || fail "grade revision history is incomplete"
+
+"${mysql_client}" --no-defaults --protocol=socket --socket="${mysql_socket}" \
+  -uroot "${db_name}" -e \
+  "SET SESSION cte_max_recursion_depth = 3000;
+   INSERT INTO student (
+       school_id, class_id, student_no, full_name, gender, status
+   )
+   WITH RECURSIVE sequence(n) AS (
+       SELECT 1
+       UNION ALL
+       SELECT n + 1 FROM sequence WHERE n < 2001
+   )
+   SELECT 1, ${class_id}, CONCAT('XLSX-', LPAD(n, 4, '0')),
+          CONCAT('导出验收学生', n), 'OTHER', 'ACTIVE'
+   FROM sequence;
+   INSERT INTO enrollment (
+       school_id, offering_id, student_id, guardian_id, status, enrolled_at
+   )
+   SELECT 1, ${attendance_offering_id}, student.id, NULL, 'ENROLLED',
+          CURRENT_TIMESTAMP(3)
+   FROM student
+   WHERE student.school_id = 1
+     AND student.student_no LIKE 'XLSX-%';
+   UPDATE course_offering
+   SET capacity = GREATEST(capacity, 3000),
+       enrolled_count = (
+           SELECT COUNT(*)
+           FROM enrollment
+           WHERE offering_id = ${attendance_offering_id}
+             AND status = 'ENROLLED'
+       )
+   WHERE id = ${attendance_offering_id};
+   INSERT INTO student_grade (
+       school_id, offering_id, student_id, teacher_id, score,
+       learning_evaluation, recorded_by, updated_by
+   )
+   SELECT 1, ${attendance_offering_id}, student.id, offering.teacher_id,
+          MOD(student.id, 101), '超过两千行导出兼容性验收',
+          teacher.user_id, teacher.user_id
+   FROM student
+   JOIN course_offering offering ON offering.id = ${attendance_offering_id}
+   JOIN teacher ON teacher.id = offering.teacher_id
+   WHERE student.school_id = 1
+     AND student.student_no LIKE 'XLSX-%';"
+grade_xlsx_status="$(status_of "${run_root}/student-grades.xlsx" \
+  -c "${admin_jar}" -b "${admin_jar}" "${base_url}/grades/export.xlsx")"
+[[ "${grade_xlsx_status}" == "200" ]] || fail "student grade Excel export failed"
+assert_xlsx "${run_root}/student-grades.xlsx" 2001 \
+  "班级,学号,学生姓名,课程,教师,成绩,学习评价,更新时间"
+
 log_step "Verifying supervision, evaluation, audit and extended reporting"
 
 history_offerings_status="$(
@@ -2765,25 +2973,29 @@ jq -e \
 
 evaluation_list_status="$(
   status_of "${run_root}/evaluation-list.json" \
-    -c "${regulator_jar}" -b "${regulator_jar}" \
+    -c "${admin_jar}" -b "${admin_jar}" \
     "${base_url}/evaluations"
 )"
-[[ "${evaluation_list_status}" == "200" ]] || fail "regulator could not list evaluations"
+[[ "${evaluation_list_status}" == "200" ]] || fail "school admin could not list evaluations"
 jq -e \
   'length >= 2
-   and all(has("studentName") | not)
-   and all(has("guardianName") | not)
-   and all(has("comment") | not)' \
+   and all(.schoolId == 1)
+   and any(.[];
+     .studentName != null
+     and .guardianName != null
+     and .courseRating >= 1
+     and .teacherRating >= 1
+     and has("comment"))' \
   "${run_root}/evaluation-list.json" >/dev/null \
-  || fail "regulator evaluation projection leaked personal details"
+  || fail "school admin evaluation view omitted ratings or guardian comments"
 
 evaluation_summary_status="$(
   status_of "${run_root}/evaluation-summary.json" \
-    -c "${regulator_jar}" -b "${regulator_jar}" \
+    -c "${admin_jar}" -b "${admin_jar}" \
     "${base_url}/evaluations/summary?schoolId=1"
 )"
 [[ "${evaluation_summary_status}" == "200" ]] \
-  || fail "regulator evaluation summary failed"
+  || fail "school admin evaluation summary failed"
 jq -e '
   .evaluationCount >= 2
   and .rating5Count >= 1
@@ -2797,11 +3009,11 @@ jq -e '
 
 teacher_hours_status="$(
   status_of "${run_root}/teacher-hours.json" \
-    -c "${regulator_jar}" -b "${regulator_jar}" \
+    -c "${admin_jar}" -b "${admin_jar}" \
     "${base_url}/reports/teacher-hours?schoolId=1"
 )"
 [[ "${teacher_hours_status}" == "200" ]] \
-  || fail "regulator teacher-hours report failed"
+  || fail "school admin teacher-hours report failed"
 jq -e '
   length > 0
   and any(.[];
@@ -2811,87 +3023,36 @@ jq -e '
 ' "${run_root}/teacher-hours.json" >/dev/null \
   || fail "teacher-hours report did not include the completed acceptance session"
 
-write_api 200 POST /supervision/alerts/scan "${regulator_jar}" \
-  '{"schoolId":1,"lowAttendanceThreshold":0.8,"deadlineDays":7}' \
-  "${run_root}/supervision-scan.json"
-jq -e \
-  '.candidateCount >= 1 and .createdCount >= 0
-   and .deduplicatedCount >= 1' \
-  "${run_root}/supervision-scan.json" >/dev/null \
-  || fail "supervision scan or active-alert deduplication failed"
-supervision_scan_run_id="$(jq -r '.scanRunId // empty' "${run_root}/supervision-scan.json")"
-[[ -n "${supervision_scan_run_id}" ]] \
-  || fail "manual supervision scan returned no scan-run id"
-scan_runs_status="$(
-  status_of "${run_root}/supervision-scan-runs.json" \
-    -c "${regulator_jar}" -b "${regulator_jar}" \
-    "${base_url}/supervision/alerts/scan-runs?limit=10"
+school_alerts_status="$(
+  status_of "${run_root}/school-supervision-alerts.json" \
+    -c "${admin_jar}" -b "${admin_jar}" \
+    "${base_url}/supervision/alerts"
 )"
-[[ "${scan_runs_status}" == "200" ]] \
-  || fail "regulator could not list supervision scan runs"
-jq -e --arg scanRunId "${supervision_scan_run_id}" \
-  'any(.[]; .id == $scanRunId
-       and .triggerSource == "MANUAL"
-       and .status == "SUCCESS"
-       and .finishedAt != null)' \
-  "${run_root}/supervision-scan-runs.json" >/dev/null \
-  || fail "manual supervision scan run was not recorded as successful"
+[[ "${school_alerts_status}" == "200" ]] \
+  || fail "school admin could not read same-school supervision alerts"
+jq -e 'all(.schoolId == 1)' "${run_root}/school-supervision-alerts.json" >/dev/null \
+  || fail "school supervision alert list leaked another school"
+cross_school_alerts_status="$(
+  status_of "${run_root}/cross-school-supervision-alerts.json" \
+    -c "${second_admin_jar}" -b "${second_admin_jar}" \
+    "${base_url}/supervision/alerts?schoolId=1"
+)"
+[[ "${cross_school_alerts_status}" == "403" ]] \
+  || fail "second school admin could query first-school supervision alerts"
 scan_runs_admin_status="$(
   status_of "${run_root}/supervision-scan-runs-school-admin.json" \
     -c "${admin_jar}" -b "${admin_jar}" \
     "${base_url}/supervision/alerts/scan-runs?limit=10"
 )"
 [[ "${scan_runs_admin_status}" == "403" ]] \
-  || fail "school admin could access regulator-only supervision scan runs"
-waiting_alerts_status="$(
-  status_of "${run_root}/waiting-supervision-alerts.json" \
-    -c "${regulator_jar}" -b "${regulator_jar}" \
-    "${base_url}/supervision/alerts?schoolId=1&status=WAITING_VERIFY"
-)"
-[[ "${waiting_alerts_status}" == "200" ]] \
-  || fail "regulator could not list waiting-verification alerts"
-seeded_alert_id="$(
-  jq -r \
-    '[.[] | select(.alertType == "LOW_ATTENDANCE")][0].id // empty' \
-    "${run_root}/waiting-supervision-alerts.json"
-)"
-[[ "${seeded_alert_id}" =~ ^[0-9]+$ ]] \
-  || fail "seeded waiting-verification alert could not be resolved"
-seeded_history_before_status="$(
-  status_of "${run_root}/seeded-history-before.json" \
-    -c "${regulator_jar}" -b "${regulator_jar}" \
-    "${base_url}/supervision/alerts/${seeded_alert_id}/history"
-)"
-[[ "${seeded_history_before_status}" == "200" ]] \
-  || fail "seeded supervision history could not be read"
-seeded_history_before_count="$(jq -r 'length' "${run_root}/seeded-history-before.json")"
-[[ "${seeded_history_before_count}" =~ ^[0-9]+$ ]] \
-  || fail "seeded supervision history count is invalid"
-write_api 200 POST "/supervision/alerts/${seeded_alert_id}/transition" \
-  "${regulator_jar}" \
-  '{"targetStatus":"CLOSED","comment":"验收复核通过，关闭预警"}' \
-  "${run_root}/supervision-closed.json"
-jq -e '.status == "CLOSED"' "${run_root}/supervision-closed.json" >/dev/null \
-  || fail "regulator could not close waiting-verification alert"
-supervision_history_status="$(
-  status_of "${run_root}/supervision-history.json" \
-    -c "${regulator_jar}" -b "${regulator_jar}" \
-    "${base_url}/supervision/alerts/${seeded_alert_id}/history"
-)"
-[[ "${supervision_history_status}" == "200" ]] || fail "supervision history could not be read"
-jq -e --argjson previousCount "${seeded_history_before_count}" \
-  'length == ($previousCount + 1)
-   and .[-1].actionType == "VERIFY_CLOSE"
-   and .[-1].actorRole == "REGULATOR"' \
-  "${run_root}/supervision-history.json" >/dev/null \
-  || fail "supervision action history is incomplete"
+  || fail "manual regulator scan-run endpoint became active for a four-role account"
 
 audit_status="$(
   status_of "${run_root}/audit-logs.json" \
-    -c "${regulator_jar}" -b "${regulator_jar}" \
+    -c "${admin_jar}" -b "${admin_jar}" \
     "${base_url}/audit-logs?schoolId=1"
 )"
-[[ "${audit_status}" == "200" ]] || fail "regulator could not read operation audit"
+[[ "${audit_status}" == "200" ]] || fail "school admin could not read operation audit"
 jq -e \
   'length > 10
    and all(.targetSchoolId == 1)
@@ -2914,17 +3075,6 @@ jq -e \
      and .requestPath == "/api/evaluations"
      and .responseStatus == 201)
    and any(.[];
-     .actorRole == "REGULATOR"
-     and .httpMethod == "POST"
-     and .requestPath == "/api/supervision/alerts/scan"
-     and .responseStatus == 200)
-   and any(.[];
-     .actorRole == "SCHOOL_ADMIN"
-     and .httpMethod == "POST"
-     and (.requestPath | startswith("/api/supervision/alerts/"))
-     and (.requestPath | endswith("/transition"))
-     and .responseStatus == 200)
-   and any(.[];
      .actorRole == "SCHOOL_ADMIN"
      and .httpMethod == "PUT"
      and (.requestPath | startswith("/api/attendance-corrections/"))
@@ -2935,7 +3085,7 @@ jq -e \
 
 performance_status="$(
   status_of "${run_root}/course-performance.json" \
-    -c "${regulator_jar}" -b "${regulator_jar}" \
+    -c "${admin_jar}" -b "${admin_jar}" \
     "${base_url}/reports/course-performance?schoolId=1"
 )"
 [[ "${performance_status}" == "200" ]] || fail "course performance report failed"
@@ -2944,7 +3094,7 @@ jq -e 'length > 0 and all(has("courseName"))' \
   || fail "course performance report returned no usable rows"
 performance_csv_status="$(
   status_of "${run_root}/course-performance.csv" \
-    -c "${regulator_jar}" -b "${regulator_jar}" \
+    -c "${admin_jar}" -b "${admin_jar}" \
     "${base_url}/reports/course-performance.csv?schoolId=1"
 )"
 [[ "${performance_csv_status}" == "200" ]] || fail "course performance CSV export failed"
@@ -2973,43 +3123,18 @@ jq -e '.processedCount == 1' "${run_root}/course-import-result.json" >/dev/null 
 
 report_status="$(
   status_of "${run_root}/report.json" \
-    -c "${regulator_jar}" -b "${regulator_jar}" "${base_url}/reports/overview"
+    -c "${admin_jar}" -b "${admin_jar}" "${base_url}/reports/overview"
 )"
-[[ "${report_status}" == "200" ]] || fail "regulator report failed"
+[[ "${report_status}" == "200" ]] || fail "school admin report failed"
 jq -e '
-  .schoolCount == 2
+  .schoolCount == 1
   and .studentCount >= 4
-  and .teacherCount >= 3
-  and .courseCount >= 5
+  and .teacherCount >= 2
+  and .courseCount >= 4
   and .enrollmentCount >= 4
-  and (.schools | length == 2)
-' "${run_root}/report.json" >/dev/null || fail "regulator report totals are inconsistent"
-regulator_write='{"schoolId":1,"className":"越权班级","grade":1,"schoolYear":"2026-2027","status":"ACTIVE"}'
-write_api 403 POST /classes "${regulator_jar}" "${regulator_write}" \
-  "${run_root}/regulator-write.json"
-
-school_admin_body='{"username":"verify_school_admin","displayName":"验收学校管理员","mobile":"13800000903","password":"VerifySchoolAdmin@2026","enabled":true}'
-write_api 201 POST /schools/2/admins "${regulator_jar}" "${school_admin_body}" \
-  "${run_root}/created-school-admin.json"
-jq -e '.schoolId == 2 and .username == "verify_school_admin"' \
-  "${run_root}/created-school-admin.json" >/dev/null \
-  || fail "regulator could not provision a school administrator"
-provisioned_admin_jar="${run_root}/provisioned-admin.cookies"
-login_as verify_school_admin SCHOOL_ADMIN "${provisioned_admin_jar}" \
-  "VerifySchoolAdmin@2026"
-jq -e '.schoolId == 2' "${run_root}/login-verify_school_admin.json" >/dev/null \
-  || fail "provisioned school administrator received the wrong school scope"
-provisioned_classes_status="$(
-  status_of "${run_root}/provisioned-admin-classes.json" \
-    -c "${provisioned_admin_jar}" -b "${provisioned_admin_jar}" \
-    "${base_url}/classes"
-)"
-[[ "${provisioned_classes_status}" == "200" ]] \
-  || fail "provisioned school administrator could not list classes"
-jq -e 'length > 0 and all(.schoolId == 2)' \
-  "${run_root}/provisioned-admin-classes.json" >/dev/null \
-  || fail "provisioned school administrator scope leaked another school"
-
+  and (.schools | length == 1)
+  and .schools[0].schoolId == 1
+' "${run_root}/report.json" >/dev/null || fail "school admin report scope is inconsistent"
 verify_parent_jar="${run_root}/verify-parent.cookies"
 login_as verify_parent GUARDIAN "${verify_parent_jar}" "VerifyParent@2026"
 password_change_body='{"currentPassword":"VerifyParent@2026","newPassword":"VerifyParentChanged@2026"}'
@@ -3021,7 +3146,7 @@ changed_session_status="$(
 )"
 [[ "${changed_session_status}" == "401" ]] \
   || fail "password change did not invalidate the current session"
-old_password_body='{"username":"verify_parent","password":"VerifyParent@2026"}'
+old_password_body='{"username":"verify_parent","password":"VerifyParent@2026","expectedRole":"GUARDIAN"}'
 write_api 401 POST /auth/login "${verify_parent_jar}" "${old_password_body}" \
   "${run_root}/old-password-login.json"
 jq -e '.code == "INVALID_CREDENTIALS"' \
@@ -3140,7 +3265,7 @@ migration_count_after_restart="$(
     -uroot --skip-column-names "${db_name}" -e \
     "SELECT COUNT(*) FROM flyway_schema_history WHERE success = 1"
 )"
-[[ "${migration_count_after_restart}" == "16" ]] \
+[[ "${migration_count_after_restart}" == "21" ]] \
   || fail "Flyway restart was not idempotent"
 refreshed_timeline_invariants="$(
   "${mysql_client}" --no-defaults --protocol=socket --socket="${mysql_socket}" \
@@ -3436,7 +3561,7 @@ stop_server
 printf "\n[verify] SUCCESS\n"
 printf "[verify] Backend: %s automated tests + executable JAR + CycloneDX SBOM passed\n" "${test_count}"
 printf "[verify] Frontend: Vitest + typecheck + production build + audit + desktop/mobile Playwright passed\n"
-printf "[verify] Database: MySQL %s default V14 -> demo V4/V4.1/V8/V11/V15 + opening-report schema/scan-run FK/restart preservation passed\n" "${mysql_version}"
+printf "[verify] Database: MySQL %s populated V15 upgrade + default V18 -> demo V20/V21 + four-role school isolation/grade history/restart preservation passed\n" "${mysql_version}"
 printf "[verify] E2E: auth/RBAC/CRUD/planning/enrollment/leave/teaching/correction/supervision/evaluation/audit/reports passed\n"
 printf "[verify] Operations: atomic frontend/backend rollback + encrypted backup/restore + backup-service-aware health transitions passed\n"
 printf "[verify] Supply chain: CI + OWASP high-severity gate + SBOM contracts passed\n"

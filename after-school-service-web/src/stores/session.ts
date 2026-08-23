@@ -47,10 +47,14 @@ export const useSessionStore = defineStore('session', () => {
     return restoreRequest
   }
 
-  async function signIn(username: string, password: string): Promise<SessionUser> {
+  async function signIn(
+    username: string,
+    password: string,
+    expectedRole: RoleCode,
+  ): Promise<SessionUser> {
     state.value = 'loading'
     try {
-      await authApi.login(username, password)
+      await authApi.login(username, password, expectedRole)
       resetCsrfToken()
       const currentUser = await authApi.fetchCurrentUser()
       user.value = currentUser

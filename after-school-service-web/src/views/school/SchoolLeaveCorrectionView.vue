@@ -36,10 +36,8 @@ const loading = ref(false)
 const leaveLoading = ref(false)
 const correctionLoading = ref(false)
 const error = ref('')
-const leaveReviewVisible = ref(false)
 const correctionReviewVisible = ref(false)
 const reviewSaving = ref(false)
-const selectedLeave = ref<LeaveRequest | null>(null)
 const selectedCorrection = ref<AttendanceCorrection | null>(null)
 const reviewDecision = ref<ReviewDecision>('APPROVED')
 const reviewRemark = ref('')
@@ -220,13 +218,6 @@ async function reloadAll(): Promise<void> {
   }
 }
 
-function openLeaveReview(item: LeaveRequest, decision: ReviewDecision): void {
-  selectedLeave.value = item
-  reviewDecision.value = decision
-  reviewRemark.value = ''
-  leaveReviewVisible.value = true
-}
-
 function openCorrectionReview(
   item: AttendanceCorrection,
   decision: ReviewDecision,
@@ -235,30 +226,6 @@ function openCorrectionReview(
   reviewDecision.value = decision
   reviewRemark.value = ''
   correctionReviewVisible.value = true
-}
-
-async function submitLeaveReview(): Promise<void> {
-  if (!selectedLeave.value || reviewSaving.value) return
-  const remark = reviewRemark.value.trim()
-  if (reviewDecision.value === 'REJECTED' && !remark) {
-    ElMessage.warning('请填写驳回原因。')
-    return
-  }
-  reviewSaving.value = true
-  try {
-    await leaveCorrectionApi.reviewLeave(
-      selectedLeave.value.id,
-      reviewDecision.value,
-      remark || null,
-    )
-    leaveReviewVisible.value = false
-    ElMessage.success(reviewDecision.value === 'APPROVED' ? '请假已批准' : '请假已驳回')
-    await loadLeaves()
-  } catch (actionError) {
-    ElMessage.error(getErrorMessage(actionError, '请假审核失败。'))
-  } finally {
-    reviewSaving.value = false
-  }
 }
 
 async function submitCorrectionReview(): Promise<void> {
@@ -372,7 +339,7 @@ onMounted(async () => {
     <PageHeader
       kicker="学校复核"
       title="请假与考勤纠错审批"
-      description="处理本校请假申请，审批教师提交的考勤纠错，并查看不可覆盖的修订历史。"
+      description="监督本校请假处理结果，审批教师提交的考勤纠错，并查看不可覆盖的修订历史。"
     >
       <template #actions>
         <el-button
@@ -428,12 +395,12 @@ onMounted(async () => {
     </section>
 
     <el-tabs v-model="activeTab" class="approval-tabs">
-      <el-tab-pane label="请假审核" name="leave">
+      <el-tab-pane label="请假记录" name="leave">
         <section class="entity-panel">
           <div class="entity-panel-header">
             <div>
               <h2>本校请假申请</h2>
-              <p>可复核本校任意开班的待审申请。</p>
+              <p>请假由任课教师审核；教务端仅查看过程与结果。</p>
             </div>
             <el-select v-model="leaveStatusFilter" class="status-filter">
               <el-option label="全部状态" value="" />
@@ -481,14 +448,6 @@ onMounted(async () => {
                   <small class="cell-note">{{ formatDateTime(row.reviewedAt) }}</small>
                 </span>
                 <span v-else class="cell-note">尚未审核</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="154" align="right">
-              <template #default="{ row }">
-                <div v-if="row.status === 'PENDING'" class="row-actions">
-                  <el-button text type="danger" @click="openLeaveReview(row, 'REJECTED')">驳回</el-button>
-                  <el-button text type="primary" @click="openLeaveReview(row, 'APPROVED')">批准</el-button>
-                </div>
               </template>
             </el-table-column>
             <template #empty>
@@ -577,44 +536,6 @@ onMounted(async () => {
         </section>
       </el-tab-pane>
     </el-tabs>
-
-    <el-dialog
-      v-model="leaveReviewVisible"
-      :title="reviewDecision === 'APPROVED' ? '批准请假' : '驳回请假'"
-      width="min(520px, 92vw)"
-      destroy-on-close
-    >
-      <div v-if="selectedLeave" class="review-summary">
-        <strong>{{ selectedLeave.studentName }} · {{ selectedLeave.courseName }}</strong>
-        <span>{{ formatDate(selectedLeave.sessionDate) }} {{ formatTime(selectedLeave.startTime) }}</span>
-        <p>{{ selectedLeave.reason }}</p>
-      </div>
-      <el-form label-position="top">
-        <el-form-item
-          label="审核意见"
-          :required="reviewDecision === 'REJECTED'"
-        >
-          <el-input
-            v-model="reviewRemark"
-            type="textarea"
-            :rows="3"
-            maxlength="500"
-            show-word-limit
-            :placeholder="reviewDecision === 'APPROVED' ? '可填写复核说明' : '请说明驳回原因'"
-          />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button :disabled="reviewSaving" @click="leaveReviewVisible = false">取消</el-button>
-        <el-button
-          :type="reviewDecision === 'APPROVED' ? 'primary' : 'danger'"
-          :loading="reviewSaving"
-          @click="submitLeaveReview"
-        >
-          {{ reviewDecision === 'APPROVED' ? '确认批准' : '确认驳回' }}
-        </el-button>
-      </template>
-    </el-dialog>
 
     <el-dialog
       v-model="correctionReviewVisible"

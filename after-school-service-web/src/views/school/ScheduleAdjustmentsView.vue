@@ -152,7 +152,7 @@ function querySessionFilter(value: unknown): SessionFilter {
 function schoolId(): number {
   const id = sessionStore.user?.schoolId
   if (!id) {
-    throw new ApiClientError('当前学校管理员账号未绑定学校。', {
+    throw new ApiClientError('当前教务管理员账号未绑定学校。', {
       code: 'SCHOOL_CONTEXT_REQUIRED',
     })
   }
@@ -741,7 +741,7 @@ onMounted(async () => {
               </p>
               <blockquote>{{ adjustment.reason }}</blockquote>
               <small>
-                {{ adjustment.requestedByName || '学校管理员' }} ·
+                {{ adjustment.requestedByName || '教务管理员' }} ·
                 {{ formatDateTime(adjustment.appliedAt) }}
               </small>
             </div>

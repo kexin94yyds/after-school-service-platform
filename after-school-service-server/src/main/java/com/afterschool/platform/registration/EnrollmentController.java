@@ -55,8 +55,38 @@ public class EnrollmentController {
         return service.guardianMonthlyAttendance(studentId, month);
     }
 
+    @GetMapping("/student/profile")
+    @PreAuthorize("hasRole('STUDENT')")
+    Map<String, Object> studentProfile() {
+        return service.studentProfile();
+    }
+
+    @GetMapping("/student/offerings")
+    @PreAuthorize("hasRole('STUDENT')")
+    List<Map<String, Object>> studentOfferings() {
+        return service.studentOfferings();
+    }
+
+    @GetMapping("/student/attendance")
+    @PreAuthorize("hasRole('STUDENT')")
+    List<Map<String, Object>> studentAttendance() {
+        return service.studentAttendance();
+    }
+
+    @GetMapping("/student/attendance/monthly")
+    @PreAuthorize("hasRole('STUDENT')")
+    Map<String, Object> studentMonthlyAttendance(@RequestParam String month) {
+        return service.studentMonthlyAttendance(month);
+    }
+
+    @GetMapping("/student/schedule")
+    @PreAuthorize("hasRole('STUDENT')")
+    List<Map<String, Object>> studentSchedule() {
+        return service.studentSchedule();
+    }
+
     @GetMapping("/enrollments")
-    @PreAuthorize("hasAnyRole('REGULATOR','SCHOOL_ADMIN','TEACHER','GUARDIAN')")
+    @PreAuthorize("hasAnyRole('REGULATOR','SCHOOL_ADMIN','TEACHER','GUARDIAN','STUDENT')")
     List<Map<String, Object>> enrollments(@RequestParam(required = false) Long schoolId) {
         return service.enrollments(schoolId);
     }
@@ -75,22 +105,34 @@ public class EnrollmentController {
                 .body(service.rosterXlsx(offeringId));
     }
 
+    @GetMapping("/enrollments/class-roster.xlsx")
+    @PreAuthorize("hasRole('SCHOOL_ADMIN')")
+    ResponseEntity<byte[]> classRosterXlsx(@RequestParam @Positive long classId) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"));
+        headers.setContentDisposition(ContentDisposition.attachment()
+                .filename("class-enrollment-roster.xlsx")
+                .build());
+        return ResponseEntity.ok().headers(headers).body(service.classRosterXlsx(classId));
+    }
+
     @PostMapping("/enrollments")
-    @PreAuthorize("hasRole('GUARDIAN')")
+    @PreAuthorize("hasRole('STUDENT')")
     ResponseEntity<Map<String, Object>> enroll(@Valid @RequestBody EnrollmentRequest request) {
         Map<String, Object> created = service.enroll(request);
         return ResponseEntity.created(URI.create("/api/enrollments/" + created.get("id"))).body(created);
     }
 
     @DeleteMapping("/enrollments/{id}")
-    @PreAuthorize("hasAnyRole('GUARDIAN','SCHOOL_ADMIN')")
+    @PreAuthorize("hasAnyRole('STUDENT','SCHOOL_ADMIN')")
     ResponseEntity<Void> cancel(@PathVariable long id) {
         service.cancel(id);
         return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/enrollments/{id}/switch")
-    @PreAuthorize("hasRole('GUARDIAN')")
+    @PreAuthorize("hasRole('STUDENT')")
     Map<String, Object> switchEnrollment(
             @PathVariable long id,
             @Valid @RequestBody EnrollmentSwitchRequest request) {
@@ -98,7 +140,7 @@ public class EnrollmentController {
     }
 
     @GetMapping("/enrollments/{id}/actions")
-    @PreAuthorize("hasAnyRole('REGULATOR','SCHOOL_ADMIN','GUARDIAN')")
+    @PreAuthorize("hasAnyRole('REGULATOR','SCHOOL_ADMIN','GUARDIAN','STUDENT')")
     List<Map<String, Object>> enrollmentActions(@PathVariable long id) {
         return service.enrollmentActions(id);
     }

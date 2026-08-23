@@ -34,20 +34,20 @@ public class AcademicController {
     }
 
     @GetMapping("/terms")
-    @PreAuthorize("hasAnyRole('REGULATOR','SCHOOL_ADMIN','TEACHER')")
+    @PreAuthorize("hasAnyRole('SCHOOL_ADMIN','TEACHER','GUARDIAN','STUDENT')")
     List<Map<String, Object>> terms() {
         return service.terms();
     }
 
     @PostMapping("/terms")
-    @PreAuthorize("hasRole('REGULATOR')")
+    @PreAuthorize("hasRole('SCHOOL_ADMIN')")
     ResponseEntity<Map<String, Object>> createTerm(@Valid @RequestBody TermRequest request) {
         Map<String, Object> created = service.createTerm(request);
         return ResponseEntity.created(URI.create("/api/terms/" + created.get("id"))).body(created);
     }
 
     @PutMapping("/terms/{id}")
-    @PreAuthorize("hasRole('REGULATOR')")
+    @PreAuthorize("hasRole('SCHOOL_ADMIN')")
     Map<String, Object> updateTerm(
             @PathVariable long id, @Valid @RequestBody TermRequest request) {
         return service.updateTerm(id, request);

@@ -22,7 +22,6 @@ import type {
   AttendanceUpdateRecord,
   CourseOffering,
   LessonSession,
-  SessionStatus,
 } from '@/api/types'
 import PageHeader from '@/components/PageHeader.vue'
 import {
@@ -53,20 +52,13 @@ const attendanceBaselineSignature = ref<string | null>(null)
 const loading = ref(false)
 const sessionLoading = ref(false)
 const attendanceLoading = ref(false)
-const generating = ref(false)
 const saving = ref(false)
 const sessionDialogVisible = ref(false)
 const sessionSaving = ref(false)
-const sessionConfirming = ref(false)
-const sessionInitialStatus = ref<SessionStatus>('SCHEDULED')
 const error = ref('')
 let sessionsRequestVersion = 0
 let attendanceRequestVersion = 0
-const sessionForm = reactive<{
-  status: SessionStatus
-  notes: string
-}>({
-  status: 'SCHEDULED',
+const sessionForm = reactive<{ notes: string }>({
   notes: '',
 })
 
@@ -76,7 +68,6 @@ const selectedOffering = computed(() =>
 const selectedSession = computed(() =>
   sessions.value.find((item) => item.id === selectedSessionId.value),
 )
-const isSchoolAdmin = computed(() => session.role === 'SCHOOL_ADMIN')
 const attendanceReadOnly = computed(
   () =>
     selectedSession.value?.status === 'COMPLETED' ||
@@ -106,9 +97,7 @@ const attendanceDirty = computed(
     attendanceDraftSignature(attendance.value) !==
       attendanceBaselineSignature.value,
 )
-const sessionBusy = computed(
-  () => sessionSaving.value || sessionConfirming.value,
-)
+const sessionBusy = computed(() => sessionSaving.value)
 
 function clearAttendanceDraft(): void {
   attendanceBaselineSignature.value = null
@@ -186,22 +175,6 @@ const attendanceStatusOptions: Array<{
   { label: '请假', value: 'LEAVE' },
   { label: '缺勤', value: 'ABSENT' },
 ]
-const sessionStatusOptions = computed<Array<{
-  label: string
-  value: SessionStatus
-}>>(() => {
-  if (selectedSession.value?.status === 'COMPLETED') {
-    return [{ label: '已完成', value: 'COMPLETED' }]
-  }
-  if (selectedSession.value?.status === 'CANCELED') {
-    return [{ label: '已取消', value: 'CANCELED' }]
-  }
-  return [
-    { label: '待上课', value: 'SCHEDULED' },
-    { label: '已取消', value: 'CANCELED' },
-  ]
-})
-
 async function loadOfferings(): Promise<void> {
   loading.value = true
   error.value = ''
@@ -310,54 +283,8 @@ async function loadAttendance(sessionId: number | null): Promise<void> {
   }
 }
 
-async function generateSessions(): Promise<void> {
-  if (!selectedOfferingId.value) return
-  const offeringId = selectedOfferingId.value
-  try {
-    await ElMessageBox.confirm(
-      '系统将依据开班周期和每周上课日生成课次。已有课次由服务端负责去重。',
-      '生成课次',
-      {
-        confirmButtonText: '确认生成',
-        cancelButtonText: '取消',
-        type: 'info',
-      },
-    )
-  } catch {
-    return
-  }
-
-  generating.value = true
-  try {
-    const items = await teachingApi.generateSessions(offeringId)
-    if (selectedOfferingId.value === offeringId) {
-      const nextSessionId = items.some(
-        (item) => item.id === selectedSessionId.value,
-      )
-        ? selectedSessionId.value
-        : items[0]?.id ?? null
-      if (nextSessionId === selectedSessionId.value) {
-        sessions.value = items
-      } else {
-        await guardAttendanceChange(() => {
-          clearAttendanceDraft()
-          sessions.value = items
-          selectedSessionId.value = nextSessionId
-        })
-      }
-    }
-    ElMessage.success('课次已生成')
-  } catch (actionError) {
-    ElMessage.error(getErrorMessage(actionError, '课次生成失败。'))
-  } finally {
-    generating.value = false
-  }
-}
-
 function openSessionEditor(): void {
   if (!selectedSession.value) return
-  sessionForm.status = selectedSession.value.status
-  sessionInitialStatus.value = selectedSession.value.status
   sessionForm.notes = selectedSession.value.notes ?? ''
   sessionDialogVisible.value = true
 }
@@ -372,38 +299,16 @@ function beforeSessionEditorClose(done: () => void): void {
 
 async function saveSession(): Promise<void> {
   if (!selectedSessionId.value || sessionBusy.value) return
-  if (
-    sessionForm.status === 'CANCELED' &&
-    sessionInitialStatus.value !== 'CANCELED'
-  ) {
-    sessionConfirming.value = true
-    try {
-      await ElMessageBox.confirm(
-        '取消课次后，该课次将不能再登记考勤。请确认已完成必要的通知与安排。',
-        '确认取消课次',
-        {
-          confirmButtonText: '确认取消',
-          cancelButtonText: '继续编辑',
-          type: 'warning',
-        },
-      )
-    } catch {
-      return
-    } finally {
-      sessionConfirming.value = false
-    }
-  }
   sessionSaving.value = true
   try {
     const updated = await teachingApi.updateSession(
       selectedSessionId.value,
-      sessionForm.status,
       sessionForm.notes.trim() || null,
     )
     const index = sessions.value.findIndex((item) => item.id === updated.id)
     if (index >= 0) sessions.value[index] = updated
     sessionDialogVisible.value = false
-    ElMessage.success('课次状态已更新')
+    ElMessage.success('课堂备注已更新')
   } catch (actionError) {
     ElMessage.error(getErrorMessage(actionError, '课次更新失败。'))
   } finally {
@@ -528,12 +433,8 @@ onBeforeUnmount(() => {
   <section class="page-stack">
     <PageHeader
       kicker="授课执行"
-      :title="isSchoolAdmin ? '本校课次与考勤' : '课次与学生考勤'"
-      :description="
-        isSchoolAdmin
-          ? '管理本校全部开班课次，核对学生出勤并保留教学记录。'
-          : '查看本人承担的开班，按课次完成学生出勤登记。'
-      "
+      title="课次与学生考勤"
+      description="查看本人承担的开班，按课次完成学生出勤登记。"
     >
       <template #actions>
         <el-button :loading="loading" @click="loadOfferings">刷新</el-button>
@@ -563,12 +464,12 @@ onBeforeUnmount(() => {
             · {{ selectedOffering.classroom }}
           </p>
           <p v-else>
-            {{ isSchoolAdmin ? '可选择本校任一开班。' : '这里只显示由你负责授课的开班。' }}
+            这里只显示由你负责授课的开班。
           </p>
         </div>
       </div>
       <div class="teaching-course-picker">
-        <span>{{ isSchoolAdmin ? '本校开班' : '我的开班' }} · {{ offerings.length }}</span>
+        <span>我的开班 · {{ offerings.length }}</span>
         <el-select
           :model-value="selectedOfferingId"
           :loading="loading"
@@ -599,13 +500,6 @@ onBeforeUnmount(() => {
               · {{ selectedOffering.classroom }}
             </p>
           </div>
-          <el-button
-            type="primary"
-            :loading="generating"
-            @click="generateSessions"
-          >
-            生成课次
-          </el-button>
         </header>
 
         <div v-loading="sessionLoading" class="session-list">
@@ -636,7 +530,7 @@ onBeforeUnmount(() => {
           </button>
           <div v-if="!sessionLoading && sessions.length === 0" class="empty-state">
             <strong>暂无课次</strong>
-            <span>可根据当前开班计划生成课次。</span>
+            <span>课次由教务排课结果自动提供。</span>
           </div>
         </div>
       </section>
@@ -748,7 +642,7 @@ onBeforeUnmount(() => {
               <el-tag type="warning" effect="plain" size="small">
                 已批准请假
               </el-tag>
-              <span>{{ record.leaveReason || '家长已完成请假审批' }}</span>
+              <span>{{ record.leaveReason || '学生已提交请假' }}</span>
             </div>
 
             <label class="attendance-remark-field">
@@ -804,19 +698,6 @@ onBeforeUnmount(() => {
         :disabled="sessionBusy"
         @submit.prevent="saveSession"
       >
-        <el-form-item label="课次状态" required>
-          <el-select v-model="sessionForm.status">
-            <el-option
-              v-for="option in sessionStatusOptions"
-              :key="option.value"
-              :label="option.label"
-              :value="option.value"
-            />
-          </el-select>
-          <div class="form-help">
-            课次在完整保存学生考勤后由系统自动标记为已完成。
-          </div>
-        </el-form-item>
         <el-form-item label="课次备注">
           <el-input
             v-model="sessionForm.notes"
@@ -824,7 +705,7 @@ onBeforeUnmount(() => {
             :rows="4"
             maxlength="500"
             show-word-limit
-            placeholder="记录调课、取消或课堂情况"
+            placeholder="记录课堂情况；课次状态由排课与考勤流程维护"
           />
         </el-form-item>
       </el-form>

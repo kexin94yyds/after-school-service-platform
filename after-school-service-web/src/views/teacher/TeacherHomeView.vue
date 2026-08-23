@@ -88,7 +88,7 @@ const tasks = computed<DashboardTask[]>(() => [
 const shortcuts = [
   {
     title: '课次与考勤',
-    description: '按本人开班生成课次，选择课次后登记学生出勤。',
+    description: '查看教务排课生成的课次，选择课次后登记学生出勤。',
     to: '/teacher/sessions',
     action: '进入授课台',
   },
@@ -169,7 +169,7 @@ onMounted(load)
   <RoleDashboard
     kicker="教师授课"
     title="课程与考勤工作台"
-    description="聚焦当前教师承担的开班，生成课次并保留每次出勤记录。"
+    description="聚焦当前教师承担的开班，按教务生成的课次保留每次出勤记录。"
     :metrics="metrics"
     :tasks="tasks"
     :shortcuts="shortcuts"

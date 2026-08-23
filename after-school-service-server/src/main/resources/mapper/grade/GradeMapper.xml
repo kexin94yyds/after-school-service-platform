@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.afterschool.platform.grade.GradeMapper">
+    <resultMap id="target" type="com.afterschool.platform.grade.GradeTarget">
+        <result property="schoolId" column="school_id"/>
+        <result property="offeringId" column="offering_id"/>
+        <result property="studentId" column="student_id"/>
+        <result property="teacherId" column="teacher_id"/>
+        <result property="enrollmentStatus" column="enrollment_status"/>
+    </resultMap>
+    <resultMap id="record" type="com.afterschool.platform.grade.GradeRecord">
+        <id property="id" column="id"/>
+        <result property="schoolId" column="school_id"/>
+        <result property="score" column="score"/>
+        <result property="learningEvaluation" column="learning_evaluation"/>
+    </resultMap>
+
+    <select id="lockTarget" resultMap="target">
+        SELECT e.school_id,
+               e.offering_id,
+               e.student_id,
+               o.teacher_id,
+               e.status AS enrollment_status
+        FROM enrollment e
+        JOIN course_offering o ON o.id = e.offering_id
+        WHERE e.offering_id = #{offeringId}
+          AND e.student_id = #{studentId}
+        FOR UPDATE
+    </select>
+
+    <select id="lockGrade" resultMap="record">
+        SELECT id, school_id, score, learning_evaluation
+        FROM student_grade
+        WHERE offering_id = #{offeringId}
+          AND student_id = #{studentId}
+        FOR UPDATE
+    </select>
+
+    <insert id="insertGrade">
+        INSERT INTO student_grade (
+            school_id, offering_id, student_id, teacher_id, score,
+            learning_evaluation, recorded_by, updated_by
+        ) VALUES (
+            #{schoolId}, #{offeringId}, #{studentId}, #{teacherId}, #{score},
+            #{learningEvaluation}, #{userId}, #{userId}
+        )
+    </insert>
+
+    <insert id="insertRevision">
+        INSERT INTO student_grade_revision (
+            school_id, grade_id, old_score, new_score,
+            old_learning_evaluation, new_learning_evaluation, changed_by
+        ) VALUES (
+            #{record.schoolId}, #{record.id}, #{record.score}, #{newScore},
+            #{record.learningEvaluation}, #{newLearningEvaluation}, #{changedBy}
+        )
+    </insert>
+
+    <update id="updateGrade">
+        UPDATE student_grade
+        SET score = #{score},
+            learning_evaluation = #{learningEvaluation},
+            updated_by = #{updatedBy}
+        WHERE id = #{id}
+    </update>
+
+    <sql id="gradeColumns">
+        grade.id,
+        grade.school_id AS schoolId,
+        school.school_name AS schoolName,
+        grade.offering_id AS offeringId,
+        offering.offering_code AS offeringCode,
+        course.course_name AS courseName,
+        course.category,
+        offering.term,
+        grade.student_id AS studentId,
+        student.student_no AS studentNo,
+        student.full_name AS studentName,
+        sc.class_name AS className,
+        sc.grade AS gradeLevel,
+        grade.teacher_id AS teacherId,
+        teacher.full_name AS teacherName,
+        grade.score,
+        grade.learning_evaluation AS learningEvaluation,
+        grade.recorded_at AS recordedAt,
+        grade.updated_at AS updatedAt,
+        updater.display_name AS updatedByName
+    </sql>
+
+    <select id="findGrade" resultType="map">
+        SELECT <include refid="gradeColumns"/>
+        FROM student_grade grade
+        JOIN school ON school.id = grade.school_id
+        JOIN course_offering offering ON offering.id = grade.offering_id
+        JOIN course ON course.id = offering.course_id
+        JOIN student ON student.id = grade.student_id
+        JOIN school_class sc ON sc.id = student.class_id
+        JOIN teacher ON teacher.id = grade.teacher_id
+        JOIN sys_user updater ON updater.id = grade.updated_by
+        WHERE grade.offering_id = #{offeringId}
+          AND grade.student_id = #{studentId}
+    </select>
+
+    <select id="listRoster" resultType="map">
+        SELECT e.student_id AS studentId,
+               student.student_no AS studentNo,
+               student.full_name AS studentName,
+               sc.class_name AS className,
+               grade.id AS gradeId,
+               grade.score,
+               grade.learning_evaluation AS learningEvaluation,
+               grade.updated_at AS updatedAt
+        FROM enrollment e
+        JOIN course_offering offering ON offering.id = e.offering_id
+        JOIN student ON student.id = e.student_id
+        JOIN school_class sc ON sc.id = student.class_id
+        LEFT JOIN student_grade grade
+          ON grade.offering_id = e.offering_id
+         AND grade.student_id = e.student_id
+        WHERE e.offering_id = #{offeringId}
+          AND offering.teacher_id = #{teacherId}
+          AND e.status = 'ENROLLED'
+        ORDER BY sc.grade, sc.class_name, student.student_no
+    </select>
+
+    <select id="listGrades" resultType="map">
+        SELECT <include refid="gradeColumns"/>
+        FROM student_grade grade
+        JOIN school ON school.id = grade.school_id
+        JOIN course_offering offering ON offering.id = grade.offering_id
+        JOIN course ON course.id = offering.course_id
+        JOIN student ON student.id = grade.student_id
+        JOIN school_class sc ON sc.id = student.class_id
+        JOIN teacher ON teacher.id = grade.teacher_id
+        JOIN sys_user updater ON updater.id = grade.updated_by
+        <if test="guardianId != null">
+            JOIN student_guardian binding
+              ON binding.student_id = grade.student_id
+             AND binding.guardian_id = #{guardianId}
+             AND binding.is_active = TRUE
+        </if>
+        WHERE grade.school_id = #{schoolId}
+          <if test="teacherId != null">AND grade.teacher_id = #{teacherId}</if>
+          <if test="studentId != null">AND grade.student_id = #{studentId}</if>
+          <if test="offeringId != null">AND grade.offering_id = #{offeringId}</if>
+        ORDER BY grade.updated_at DESC, grade.id DESC
+    </select>
+
+    <select id="gradeSummary" resultType="map">
+        SELECT offering.id AS offeringId,
+               offering.offering_code AS offeringCode,
+               course.course_name AS courseName,
+               teacher.full_name AS teacherName,
+               COUNT(grade.id) AS gradedCount,
+               ROUND(AVG(grade.score), 2) AS averageScore,
+               SUM(CASE WHEN grade.score &gt;= 90 THEN 1 ELSE 0 END) AS excellentCount,
+               SUM(CASE WHEN grade.score BETWEEN 80 AND 89.99 THEN 1 ELSE 0 END) AS goodCount,
+               SUM(CASE WHEN grade.score BETWEEN 60 AND 79.99 THEN 1 ELSE 0 END) AS passCount,
+               SUM(CASE WHEN grade.score &lt; 60 THEN 1 ELSE 0 END) AS needsSupportCount
+        FROM course_offering offering
+        JOIN course ON course.id = offering.course_id
+        JOIN teacher ON teacher.id = offering.teacher_id
+        LEFT JOIN student_grade grade ON grade.offering_id = offering.id
+        WHERE offering.school_id = #{schoolId}
+          <if test="teacherId != null">AND offering.teacher_id = #{teacherId}</if>
+        GROUP BY offering.id, offering.offering_code, course.course_name, teacher.full_name
+        ORDER BY course.course_name, offering.offering_code
+    </select>
+
+    <select id="listRevisions" resultType="map">
+        SELECT revision.id,
+               revision.old_score AS oldScore,
+               revision.new_score AS newScore,
+               revision.old_learning_evaluation AS oldLearningEvaluation,
+               revision.new_learning_evaluation AS newLearningEvaluation,
+               actor.display_name AS changedByName,
+               revision.changed_at AS changedAt
+        FROM student_grade_revision revision
+        JOIN student_grade grade ON grade.id = revision.grade_id
+        JOIN sys_user actor ON actor.id = revision.changed_by
+        WHERE revision.grade_id = #{gradeId}
+          AND revision.school_id = #{schoolId}
+          <if test="teacherId != null">AND grade.teacher_id = #{teacherId}</if>
+        ORDER BY revision.changed_at DESC, revision.id DESC
+    </select>
+</mapper>

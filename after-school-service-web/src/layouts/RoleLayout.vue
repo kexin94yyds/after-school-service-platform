@@ -24,35 +24,34 @@ interface RoleProfile {
 }
 
 const profiles: Record<RoleCode, RoleProfile> = {
-  REGULATOR: {
-    label: '教育监管人员',
-    shortLabel: '监管',
-    scope: '跨学校监管数据',
+  STUDENT: {
+    label: '学生',
+    shortLabel: '学生',
+    scope: '本人教务数据',
     menu: [
-      { label: '监管总览', to: '/regulator', section: '工作台' },
-      { label: '学校管理', to: '/regulator/schools', section: '基础治理' },
-      { label: '学期与计划备案', to: '/regulator/academic' },
-      { label: '监管预警', to: '/regulator/supervision', section: '监管处置' },
-      { label: '统计报表', to: '/regulator/reports', section: '监管分析' },
-      { label: '综合分析', to: '/regulator/analysis' },
-      { label: '操作审计', to: '/regulator/audit' },
+      { label: '学生工作台', to: '/student', section: '工作台' },
+      { label: '学生选课', to: '/student/enrollments', section: '学习安排' },
+      { label: '个人课表', to: '/student/schedule' },
+      { label: '请假与考勤', to: '/student/attendance' },
+      { label: '成绩与评价', to: '/student/grades' },
     ],
   },
   SCHOOL_ADMIN: {
-    label: '学校管理员',
-    shortLabel: '校管',
+    label: '教务管理员',
+    shortLabel: '教务',
     scope: '当前学校业务数据',
     menu: [
-      { label: '学校工作台', to: '/school', section: '工作台' },
+      { label: '教务工作台', to: '/school', section: '工作台' },
       { label: '组织与人员', to: '/school/organization', section: '教务基础' },
+      { label: '学期管理', to: '/school/terms' },
       { label: '学期资源', to: '/school/academic' },
       { label: '课程与开班', to: '/school/courses' },
       { label: '报名管理', to: '/school/enrollments', section: '业务执行' },
-      { label: '授课与考勤', to: '/school/teaching' },
       { label: '调课管理', to: '/school/schedule-adjustments' },
       { label: '请假与纠错', to: '/school/leave-corrections' },
       { label: '整改处理', to: '/school/rectifications', section: '质量治理' },
       { label: '本校统计', to: '/school/reports' },
+      { label: '成绩统计', to: '/school/grades' },
       { label: '操作审计', to: '/school/audit' },
     ],
   },
@@ -64,6 +63,7 @@ const profiles: Record<RoleCode, RoleProfile> = {
       { label: '教师工作台', to: '/teacher', section: '工作台' },
       { label: '课次与考勤', to: '/teacher/sessions', section: '授课执行' },
       { label: '请假与纠错', to: '/teacher/leave-corrections' },
+      { label: '成绩与评价', to: '/teacher/grades' },
     ],
   },
   GUARDIAN: {
@@ -72,8 +72,7 @@ const profiles: Record<RoleCode, RoleProfile> = {
     scope: '已绑定学生数据',
     menu: [
       { label: '家长服务', to: '/parent', section: '工作台' },
-      { label: '学生选课', to: '/parent/enrollments', section: '学生服务' },
-      { label: '课次请假', to: '/parent/leaves' },
+      { label: '子女教务信息', to: '/parent/children', section: '学生服务' },
       { label: '课程评价', to: '/parent/evaluations' },
     ],
   },

@@ -14,6 +14,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -21,6 +22,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Component
 @Profile("demo")
+@ConditionalOnProperty(
+        name = "app.demo.timeline.enabled",
+        havingValue = "true",
+        matchIfMissing = true)
 public class DemoTimelineRefresher implements ApplicationRunner {
 
     private static final Logger log =
@@ -173,10 +178,15 @@ public class DemoTimelineRefresher implements ApplicationRunner {
     private List<OfferingState> loadCurrentOfferings() {
         return jdbcTemplate.query(
                 """
-                SELECT offering_code, term, term_id, plan_id, week_day,
-                       start_date, start_time, status
-                FROM course_offering
-                WHERE offering_code IN (
+                SELECT offering.school_id, offering.offering_code,
+                       offering.term, offering.term_id,
+                       term.school_id AS term_school_id,
+                       offering.plan_id, offering.week_day,
+                       offering.start_date, offering.start_time,
+                       offering.status
+                FROM course_offering offering
+                JOIN academic_term term ON term.id = offering.term_id
+                WHERE offering.offering_code IN (
                     'O-DEMO-ART-001',
                     'O-DEMO-TECH-001',
                     'O-DEMO-SCI-001'
@@ -185,9 +195,11 @@ public class DemoTimelineRefresher implements ApplicationRunner {
                 FOR UPDATE
                 """,
                 (resultSet, rowNumber) -> new OfferingState(
+                        resultSet.getLong("school_id"),
                         resultSet.getString("offering_code"),
                         resultSet.getString("term"),
                         resultSet.getLong("term_id"),
+                        resultSet.getLong("term_school_id"),
                         resultSet.getLong("plan_id"),
                         resultSet.getInt("week_day"),
                         resultSet.getDate("start_date").toLocalDate(),
@@ -244,7 +256,8 @@ public class DemoTimelineRefresher implements ApplicationRunner {
                         CURRENT_OFFERINGS.contains(offering.code())
                                 && CURRENT_TERM_CODES.contains(
                                         offering.termCode())
-                                && offering.termId() == 1L
+                                && offering.termId() > 0
+                                && offering.termSchoolId() == offering.schoolId()
                                 && OFFERING_PLAN_IDS.get(offering.code())
                                         == offering.planId()
                                 && OFFERING_DAYS.get(offering.code())
@@ -325,48 +338,56 @@ public class DemoTimelineRefresher implements ApplicationRunner {
                         """) == 1
                 && count("""
                         SELECT COUNT(*)
-                        FROM school_service_plan
-                        WHERE term_id = 1
+                        FROM school_service_plan plan
+                        JOIN academic_term term ON term.id = plan.term_id
+                        WHERE term.school_id = plan.school_id
+                          AND term.term_code IN (
+                              '2026-2027-1', 'DEMO-CURRENT'
+                          )
                           AND (
                               (
-                                  id = 1
-                                  AND school_id = 1
-                                  AND plan_code IN (
+                                  plan.id = 1
+                                  AND plan.school_id = 1
+                                  AND plan.plan_code IN (
                                       'PLAN-DEMO001-2026-1',
                                       'PLAN-DEMO001-CURRENT'
                                   )
-                                  AND status = 'ACTIVE'
+                                  AND plan.status = 'ACTIVE'
                               )
                               OR (
-                                  id = 2
-                                  AND school_id = 2
-                                  AND plan_code IN (
+                                  plan.id = 2
+                                  AND plan.school_id = 2
+                                  AND plan.plan_code IN (
                                       'PLAN-DEMO002-2026-1',
                                       'PLAN-DEMO002-CURRENT'
                                   )
-                                  AND status = 'FILED'
+                                  AND plan.status = 'FILED'
                               )
                           )
                         """) == 2
                 && count("""
                         SELECT COUNT(*)
-                        FROM school_calendar_event
-                        WHERE term_id = 1
+                        FROM school_calendar_event event
+                        JOIN academic_term term ON term.id = event.term_id
+                        WHERE term.school_id = event.school_id
+                          AND term.term_code IN (
+                              '2026-2027-1', 'DEMO-CURRENT'
+                          )
                           AND (
                               (
-                                  id = 1
-                                  AND school_id = 1
-                                  AND day_type = 'TEACHING_DAY'
+                                  event.id = 1
+                                  AND event.school_id = 1
+                                  AND event.day_type = 'TEACHING_DAY'
                               )
                               OR (
-                                  id = 2
-                                  AND school_id = 1
-                                  AND day_type = 'HOLIDAY'
+                                  event.id = 2
+                                  AND event.school_id = 1
+                                  AND event.day_type = 'HOLIDAY'
                               )
                               OR (
-                                  id = 3
-                                  AND school_id = 2
-                                  AND day_type = 'HOLIDAY'
+                                  event.id = 3
+                                  AND event.school_id = 2
+                                  AND event.day_type = 'HOLIDAY'
                               )
                           )
                         """) == 3;
@@ -379,7 +400,7 @@ public class DemoTimelineRefresher implements ApplicationRunner {
 
     private void refreshAcademicContext(DemoTimeline timeline) {
         requireUpdated(
-                "the academic term",
+                "the school-scoped academic terms",
                 jdbcTemplate.update(
                 """
                 UPDATE academic_term
@@ -387,13 +408,21 @@ public class DemoTimelineRefresher implements ApplicationRunner {
                     term_name = ?,
                     start_date = ?,
                     end_date = ?
-                WHERE id = 1
+                WHERE id IN (
+                    SELECT DISTINCT term_id
+                    FROM course_offering
+                    WHERE offering_code IN (
+                        'O-DEMO-ART-001',
+                        'O-DEMO-TECH-001',
+                        'O-DEMO-SCI-001'
+                    )
+                )
                   AND status = 'ACTIVE'
                 """,
                 timeline.termName(),
                 Date.valueOf(timeline.termStartDate()),
                 Date.valueOf(timeline.termEndDate())),
-                1);
+                2);
         requireUpdated(
                 "the seeded classes",
                 jdbcTemplate.update(
@@ -561,9 +590,11 @@ public class DemoTimelineRefresher implements ApplicationRunner {
     static record TermState(long id, String code, String status) {}
 
     static record OfferingState(
+            long schoolId,
             String code,
             String termCode,
             long termId,
+            long termSchoolId,
             long planId,
             int weekDay,
             LocalDate startDate,

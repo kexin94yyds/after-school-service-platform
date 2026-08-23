@@ -70,6 +70,10 @@ class PeopleServiceTest {
     @Test
     void inactiveStudentKeepsRequestedStatus() {
         when(mapper.classExists(2, 1)).thenReturn(1);
+        doAnswer(invocation -> {
+            ((NewUser) invocation.getArgument(0)).setId(18L);
+            return 1;
+        }).when(mapper).insertUser(any(NewUser.class));
         when(mapper.findStudentByNo(1, "S-001"))
                 .thenReturn(Map.of("id", 8L));
 
@@ -78,18 +82,25 @@ class PeopleServiceTest {
                 2,
                 "S-001",
                 "停用学生",
+                "inactive_student",
+                "StudentPassword@2026",
                 "FEMALE",
                 LocalDate.of(2017, 1, 1),
                 "INACTIVE"));
 
         verify(mapper).insertStudent(
                 1,
+                18,
                 2,
                 "S-001",
                 "停用学生",
                 "FEMALE",
                 LocalDate.of(2017, 1, 1),
                 "INACTIVE");
+        ArgumentCaptor<NewUser> user = ArgumentCaptor.forClass(NewUser.class);
+        verify(mapper).insertUser(user.capture());
+        assertThat(user.getValue().getRoleCode()).isEqualTo("STUDENT");
+        assertThat(user.getValue().isEnabled()).isFalse();
     }
 
     @Test

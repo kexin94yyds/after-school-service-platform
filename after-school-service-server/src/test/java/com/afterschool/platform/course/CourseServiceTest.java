@@ -343,7 +343,7 @@ class CourseServiceTest {
     @Test
     void rejectsRoomConflictForDraftOfferingLinkedToAFiledPlan() {
         when(currentUser.schoolScope(1L)).thenReturn(1L);
-        when(academicMapper.lockTerm(2)).thenReturn(term());
+        when(academicMapper.lockTerm(2, 1)).thenReturn(term());
         when(academicMapper.lockServicePlan(3, 1)).thenReturn(plan("FILED"));
         when(mapper.lockTeacher(1, 1)).thenReturn(1L);
         when(academicMapper.lockRoom(4, 1)).thenReturn(room());

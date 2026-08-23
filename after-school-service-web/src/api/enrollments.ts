@@ -6,9 +6,34 @@ import type {
   GuardianMonthlyAttendance,
   GuardianOffering,
   GuardianStudent,
+  StudentProfile,
+  StudentScheduleItem,
 } from './types'
 
 export const enrollmentApi = {
+  async getStudentProfile(): Promise<StudentProfile> {
+    const response = await http.get<StudentProfile>('/student/profile')
+    return response.data
+  },
+  async getOwnOfferings(): Promise<GuardianOffering[]> {
+    const response = await http.get<GuardianOffering[]>('/student/offerings')
+    return response.data
+  },
+  async getOwnAttendance(): Promise<GuardianAttendance[]> {
+    const response = await http.get<GuardianAttendance[]>('/student/attendance')
+    return response.data
+  },
+  async getOwnMonthlyAttendance(month: string): Promise<GuardianMonthlyAttendance> {
+    const response = await http.get<GuardianMonthlyAttendance>(
+      '/student/attendance/monthly',
+      { params: { month } },
+    )
+    return response.data
+  },
+  async getOwnSchedule(): Promise<StudentScheduleItem[]> {
+    const response = await http.get<StudentScheduleItem[]>('/student/schedule')
+    return response.data
+  },
   async getEnrollments(): Promise<Enrollment[]> {
     const response = await http.get<Enrollment[]>('/enrollments')
     return response.data
@@ -47,6 +72,16 @@ export const enrollmentApi = {
     anchor.click()
     anchor.remove()
     URL.revokeObjectURL(url)
+  },
+  async downloadClassRoster(classId: number): Promise<void> {
+    const response = await http.get<Blob>('/enrollments/class-roster.xlsx', {
+      params: { classId }, responseType: 'blob',
+    })
+    const blob = response.data instanceof Blob ? response.data : new Blob([response.data])
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url; anchor.download = 'class-enrollment-roster.xlsx'
+    document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url)
   },
   async getGuardianStudents(): Promise<GuardianStudent[]> {
     const response = await http.get<GuardianStudent[]>('/guardian/students')

@@ -31,7 +31,8 @@ public final class SimpleXlsx {
 
     private static final int MAX_ENTRIES = 50;
     private static final int MAX_UNCOMPRESSED_BYTES = 20 * 1024 * 1024;
-    private static final int MAX_ROWS = 2_000;
+    private static final int MAX_IMPORT_ROWS = 2_000;
+    private static final int MAX_EXPORT_ROWS = 1_048_575;
     private static final int MAX_COLUMNS = 40;
 
     private SimpleXlsx() {}
@@ -43,8 +44,9 @@ public final class SimpleXlsx {
         if (headers == null || headers.isEmpty() || headers.size() > MAX_COLUMNS) {
             throw new IllegalArgumentException("XLSX headers must contain 1 to 40 columns");
         }
-        if (rows == null || rows.size() > MAX_ROWS) {
-            throw new IllegalArgumentException("XLSX rows cannot exceed 2000");
+        if (rows == null || rows.size() > MAX_EXPORT_ROWS) {
+            throw new IllegalArgumentException(
+                    "XLSX data rows cannot exceed the worksheet limit");
         }
         String sheetName = sanitizeSheetName(requestedSheetName);
         try (ByteArrayOutputStream output = new ByteArrayOutputStream();
@@ -132,7 +134,7 @@ public final class SimpleXlsx {
             byte[] xml, List<String> sharedStrings) {
         Document document = parseXml(xml);
         NodeList rowNodes = document.getElementsByTagNameNS("*", "row");
-        if (rowNodes.getLength() > MAX_ROWS + 1) {
+        if (rowNodes.getLength() > MAX_IMPORT_ROWS + 1) {
             throw invalid("Excel 数据行不能超过 2000 行");
         }
         List<List<String>> rows = new ArrayList<>();

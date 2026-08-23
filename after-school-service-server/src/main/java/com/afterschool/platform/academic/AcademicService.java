@@ -28,7 +28,7 @@ public class AcademicService {
     }
 
     public List<Map<String, Object>> terms() {
-        return mapper.listTerms();
+        return mapper.listTerms(currentUser.schoolScope(null));
     }
 
     @Transactional
@@ -39,20 +39,23 @@ public class AcademicService {
                     "新建学期状态必须为草稿");
         }
         validateTermRange(request.startDate(), request.endDate());
+        long schoolId = currentUser.schoolScope(null);
         mapper.insertTerm(
+                schoolId,
                 request.termCode().strip(),
                 request.termName().strip(),
                 request.startDate(),
                 request.endDate(),
                 "DRAFT",
                 currentUser.principal().id());
-        return mapper.findTermByCode(request.termCode().strip());
+        return mapper.findTermByCode(schoolId, request.termCode().strip());
     }
 
     @Transactional
     public Map<String, Object> updateTerm(long id, AcademicController.TermRequest request) {
         validateTermRange(request.startDate(), request.endDate());
-        AcademicTerm current = mapper.lockTerm(id);
+        long schoolId = currentUser.schoolScope(null);
+        AcademicTerm current = mapper.lockTerm(id, schoolId);
         if (current == null) {
             throw ApiException.notFound("学期不存在");
         }
@@ -62,17 +65,18 @@ public class AcademicService {
                 || !Objects.equals(current.getEndDate(), request.endDate());
         if (shapeChanged
                 && (!"DRAFT".equals(current.getStatus())
-                        || mapper.countTermPlans(id) > 0)) {
+                        || mapper.countTermPlans(id, schoolId) > 0)) {
             throw ApiException.conflict(
                     "TERM_SHAPE_FROZEN",
                     "学期启用或已有学校计划后不能修改编码及日期范围");
         }
         if (isClosedOrArchived(request.status())
                 && !Objects.equals(current.getStatus(), request.status())) {
-            mapper.lockTermOfferings(id);
+            mapper.lockTermOfferings(id, schoolId);
         }
         if (mapper.updateTerm(
                         id,
+                        schoolId,
                         request.termCode().strip(),
                         request.termName().strip(),
                         request.startDate(),
@@ -81,7 +85,7 @@ public class AcademicService {
                 != 1) {
             throw ApiException.notFound("学期不存在");
         }
-        return mapper.findTermByCode(request.termCode().strip());
+        return mapper.findTermByCode(schoolId, request.termCode().strip());
     }
 
     public List<Map<String, Object>> servicePlans(Long requestedSchoolId, Long termId) {
@@ -154,7 +158,7 @@ public class AcademicService {
     public Map<String, Object> createServicePlan(
             AcademicController.ServicePlanRequest request) {
         long schoolId = currentUser.schoolScope(request.schoolId());
-        AcademicTerm term = requireWritableTerm(request.termId());
+        AcademicTerm term = requireWritableTerm(request.termId(), schoolId);
         mapper.insertServicePlan(
                 schoolId,
                 term.getId(),
@@ -173,7 +177,7 @@ public class AcademicService {
         if (snapshot == null || snapshot.getSchoolId() != schoolId) {
             throw ApiException.notFound("服务计划不存在或不在当前学校");
         }
-        requireWritableTerm(request.termId());
+        requireWritableTerm(request.termId(), schoolId);
         ServicePlan current = mapper.lockServicePlan(id, schoolId);
         if (current == null) {
             throw ApiException.notFound("服务计划不存在或不在当前学校");
@@ -208,7 +212,7 @@ public class AcademicService {
             throw ApiException.notFound("服务计划不存在");
         }
         long schoolId = currentUser.schoolScope(snapshot.getSchoolId());
-        AcademicTerm term = mapper.lockTerm(snapshot.getTermId());
+        AcademicTerm term = mapper.lockTerm(snapshot.getTermId(), schoolId);
         if (term == null) {
             throw ApiException.notFound("服务计划所属学期不存在");
         }
@@ -350,7 +354,8 @@ public class AcademicService {
     public Map<String, Object> createCalendarEvent(
             AcademicController.CalendarEventRequest request) {
         long schoolId = currentUser.schoolScope(request.schoolId());
-        AcademicTerm term = requireCalendarTerm(request.termId(), request.eventDate());
+        AcademicTerm term = requireCalendarTerm(
+                request.termId(), request.eventDate(), schoolId);
         reconcileClosedCalendarDay(
                 schoolId, request.eventDate(), request.dayType());
         mapper.insertCalendarEvent(
@@ -368,7 +373,7 @@ public class AcademicService {
     public Map<String, Object> updateCalendarEvent(
             long id, AcademicController.CalendarEventRequest request) {
         long schoolId = currentUser.schoolScope(request.schoolId());
-        requireCalendarTerm(request.termId(), request.eventDate());
+        requireCalendarTerm(request.termId(), request.eventDate(), schoolId);
         if (mapper.lockCalendarEvent(id, schoolId) == null) {
             throw ApiException.notFound("校历事件不存在或不在当前学校");
         }
@@ -415,7 +420,8 @@ public class AcademicService {
         }
         long schoolId = currentUser.schoolScope(snapshot.getSchoolId());
 
-        if (snapshot.getTermId() != null && mapper.lockTerm(snapshot.getTermId()) == null) {
+        if (snapshot.getTermId() != null
+                && mapper.lockTerm(snapshot.getTermId(), schoolId) == null) {
             throw ApiException.notFound("课次所属学期不存在");
         }
         if (mapper.lockTeacher(snapshot.getTeacherId(), schoolId) == null) {
@@ -503,7 +509,7 @@ public class AcademicService {
         // lesson prevents a second schedule mutation from forming a
         // student/lesson deadlock while its fresh conflict read runs.
         if (sessionSnapshot.getTermId() != null
-                && mapper.lockTerm(sessionSnapshot.getTermId()) == null) {
+                && mapper.lockTerm(sessionSnapshot.getTermId(), schoolId) == null) {
             throw ApiException.notFound("课次所属学期不存在");
         }
         if (mapper.lockTeacher(sessionSnapshot.getTeacherId(), schoolId) == null) {
@@ -715,8 +721,8 @@ public class AcademicService {
         }
     }
 
-    private AcademicTerm requireWritableTerm(long termId) {
-        AcademicTerm term = mapper.lockTerm(termId);
+    private AcademicTerm requireWritableTerm(long termId, long schoolId) {
+        AcademicTerm term = mapper.lockTerm(termId, schoolId);
         if (term == null) {
             throw ApiException.badRequest("INVALID_TERM", "学期不存在");
         }
@@ -728,8 +734,9 @@ public class AcademicService {
         return term;
     }
 
-    private AcademicTerm requireCalendarTerm(long termId, LocalDate eventDate) {
-        AcademicTerm term = mapper.lockTerm(termId);
+    private AcademicTerm requireCalendarTerm(
+            long termId, LocalDate eventDate, long schoolId) {
+        AcademicTerm term = mapper.lockTerm(termId, schoolId);
         if (term == null) {
             throw ApiException.badRequest("INVALID_TERM", "学期不存在");
         }
@@ -842,8 +849,14 @@ public class AcademicService {
     private void validatePlanTransition(String role, String current, String target) {
         boolean allowed;
         if ("SCHOOL_ADMIN".equals(role)) {
-            allowed = List.of("DRAFT", "RETURNED").contains(current)
-                    && "SUBMITTED".equals(target);
+            allowed = switch (current) {
+                case "DRAFT", "RETURNED" -> "SUBMITTED".equals(target);
+                case "SUBMITTED" -> List.of("FILED", "RETURNED").contains(target);
+                case "FILED" -> "ACTIVE".equals(target);
+                case "ACTIVE" -> "CLOSED".equals(target);
+                case "CLOSED" -> "ARCHIVED".equals(target);
+                default -> false;
+            };
         } else if ("REGULATOR".equals(role)) {
             allowed = switch (current) {
                 case "SUBMITTED" -> List.of("FILED", "RETURNED").contains(target);

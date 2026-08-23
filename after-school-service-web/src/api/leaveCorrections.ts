@@ -47,8 +47,8 @@ export interface LeaveRequest {
   studentId: number
   studentNo: string
   studentName: string
-  guardianId: number
-  guardianName: string
+  guardianId: number | null
+  guardianName: string | null
   reason: string
   status: LeaveStatus
   submittedBy: number
@@ -161,6 +161,10 @@ interface WorkflowFilters<TStatus extends string> {
 }
 
 export const leaveCorrectionApi = {
+  async getStudentSessions(): Promise<GuardianLeaveSession[]> {
+    const response = await http.get<GuardianLeaveSession[]>('/student/sessions')
+    return response.data
+  },
   async getGuardianStudents(): Promise<GuardianStudentSummary[]> {
     const response = await http.get<GuardianStudentSummary[]>('/guardian/students')
     return response.data

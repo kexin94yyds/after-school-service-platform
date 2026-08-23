@@ -13,6 +13,12 @@ interface LoginForm {
   password: string
 }
 
+const props = defineProps<{
+  expectedRole: RoleCode
+  roleTitle: string
+  roleDescription: string
+}>()
+
 const router = useRouter()
 const route = useRoute()
 const session = useSessionStore()
@@ -63,7 +69,11 @@ async function submit(): Promise<void> {
   try {
     const valid = await formRef.value?.validate().catch(() => false)
     if (!valid) return
-    const user = await session.signIn(form.username.trim(), form.password)
+    const user = await session.signIn(
+      form.username.trim(),
+      form.password,
+      props.expectedRole,
+    )
     await router.replace(safeRedirect(user.role))
   } catch (error) {
     const apiError = toApiClientError(error, '登录失败，请核对账号和密码。')
@@ -83,10 +93,10 @@ async function submit(): Promise<void> {
         <span>中小学课后服务</span>
       </div>
       <div>
-        <p class="intro-label">计划、选课、教学与监管统一协作</p>
-        <h1 id="platform-title">让每项课后服务，都可执行、可追溯</h1>
+        <p class="intro-label">{{ roleTitle }}独立登录入口</p>
+        <h1 id="platform-title">{{ roleDescription }}</h1>
         <p class="intro-copy">
-          从计划备案、课程排班到请假考勤、整改评价，四类角色在同一业务链上协同完成。
+          学生、家长、教师和教务管理员各自使用独立入口，登录后只进入本角色工作台。
         </p>
         <figure class="classroom-visual">
           <img
@@ -105,10 +115,10 @@ async function submit(): Promise<void> {
         </figure>
       </div>
       <div class="intro-capabilities" aria-label="平台能力">
-        <span>计划备案</span>
+        <span>开课计划</span>
         <span>教务执行</span>
         <span>家校服务</span>
-        <span>监管闭环</span>
+        <span>成绩统计</span>
       </div>
     </section>
 
@@ -116,8 +126,8 @@ async function submit(): Promise<void> {
       <div class="login-card">
         <header>
           <span class="page-kicker">安全会话登录</span>
-          <h2>登录工作台</h2>
-          <p>系统将根据账号的服务端角色进入对应工作台。</p>
+          <h2>{{ roleTitle }}登录</h2>
+          <p>服务端会核对账号角色，其他角色账号无法从本入口登录。</p>
         </header>
 
         <el-alert
@@ -175,8 +185,9 @@ async function submit(): Promise<void> {
         </el-form>
 
         <p class="security-note">
-          请使用学校或监管部门分配的账号登录，离开公共设备前请退出系统。
+          请使用学校分配的账号登录，离开公共设备前请退出系统。
         </p>
+        <RouterLink class="login-role-back" to="/login">返回选择其他角色</RouterLink>
       </div>
     </section>
   </main>

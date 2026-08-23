@@ -31,22 +31,23 @@ public class LeaveCorrectionService {
                 studentId, principal.guardianId(), LocalDateTime.now(clock));
     }
 
+    public List<Map<String, Object>> studentLeaveSessions() {
+        return mapper.listStudentLeaveSessions(
+                requireStudent().studentId(), LocalDateTime.now(clock));
+    }
+
     @Transactional
     public Map<String, Object> submitLeave(
             LeaveCorrectionController.LeaveSubmission request) {
-        PlatformPrincipal principal = requireGuardian();
+        PlatformPrincipal principal = requireStudent();
+        if (request.studentId() != principal.studentId()) {
+            throw ApiException.forbidden("只能为本人提交请假");
+        }
         SessionWorkflowContext initial = mapper.findSessionContext(request.sessionId());
         if (initial == null) {
             throw ApiException.notFound("课次不存在");
         }
         requireSameSchool(principal, initial.getSchoolId());
-        if (mapper.lockGuardianStudentBinding(
-                        initial.getSchoolId(),
-                        request.studentId(),
-                        principal.guardianId())
-                == null) {
-            throw ApiException.forbidden("只能为已绑定且该课次有效报名的学生请假");
-        }
         SessionWorkflowContext locked = lockSession(initial);
         requireSameSchool(principal, locked.getSchoolId());
         validateLeaveSubmissionWindow(locked);
@@ -57,7 +58,7 @@ public class LeaveCorrectionService {
                         LocalDateTime.of(
                                 locked.getSessionDate(), locked.getStartTime()))
                 == null) {
-            throw ApiException.forbidden("只能为已绑定且该课次有效报名的学生请假");
+            throw ApiException.forbidden("只能为本人已报名的未来课次请假");
         }
         if (mapper.countActiveLeave(locked.getSessionId(), request.studentId()) > 0) {
             throw ApiException.conflict(
@@ -69,7 +70,7 @@ public class LeaveCorrectionService {
         record.setOfferingId(locked.getOfferingId());
         record.setSessionId(locked.getSessionId());
         record.setStudentId(request.studentId());
-        record.setGuardianId(principal.guardianId());
+        record.setGuardianId(null);
         if (mapper.insertLeave(record, request.reason().strip(), principal.id()) != 1) {
             throw ApiException.conflict("LEAVE_SUBMIT_FAILED", "请假申请未能保存");
         }
@@ -78,21 +79,15 @@ public class LeaveCorrectionService {
 
     @Transactional
     public Map<String, Object> withdrawLeave(long id) {
-        PlatformPrincipal principal = requireGuardian();
+        PlatformPrincipal principal = requireStudent();
         LeaveRequestRecord initial = mapper.findLeaveRecord(id);
         if (initial == null) {
             throw ApiException.notFound("请假申请不存在");
         }
         requireSameSchool(principal, initial.getSchoolId());
-        if (initial.getGuardianId() != principal.guardianId()) {
+        if (initial.getStudentId() != principal.studentId()
+                || initial.getSubmittedBy() != principal.id()) {
             throw ApiException.forbidden("只能撤回本人提交的请假");
-        }
-        if (mapper.lockGuardianStudentBinding(
-                        initial.getSchoolId(),
-                        initial.getStudentId(),
-                        initial.getGuardianId())
-                == null) {
-            throw ApiException.forbidden("当前监护关系已失效，不能撤回请假");
         }
         SessionWorkflowContext lockedSession = lockSession(initial);
         LeaveRequestRecord locked = mapper.lockLeaveRecord(id);
@@ -103,7 +98,7 @@ public class LeaveCorrectionService {
             throw ApiException.conflict(
                     "LEAVE_NOT_PENDING", "只有待审核请假可以撤回");
         }
-        if (mapper.withdrawLeave(id, principal.guardianId(), principal.id()) != 1) {
+        if (mapper.withdrawLeave(id, principal.studentId(), principal.id()) != 1) {
             throw ApiException.conflict("LEAVE_CHANGED", "请假状态已变化，请刷新后重试");
         }
         return requireLeaveView(id);
@@ -128,16 +123,6 @@ public class LeaveCorrectionService {
         }
         PlatformPrincipal principal = currentUser.principal();
         requireTeachingWriteAccess(principal, initial, true);
-        if ("APPROVED".equals(request.decision())
-                && mapper.lockGuardianStudentBinding(
-                                initial.getSchoolId(),
-                                initial.getStudentId(),
-                                initial.getGuardianId())
-                        == null) {
-            throw ApiException.conflict(
-                    "LEAVE_ENROLLMENT_INACTIVE",
-                    "学生报名或当前监护关系已失效，不能批准请假");
-        }
         SessionWorkflowContext lockedSession = lockSession(initial);
         requireTeachingWriteAccess(principal, lockedSession, true);
         if ("APPROVED".equals(request.decision())) {
@@ -181,6 +166,7 @@ public class LeaveCorrectionService {
         Long schoolId;
         Long teacherId = null;
         Long guardianId = null;
+        Long studentId = null;
         switch (principal.roleCode()) {
             case "REGULATOR" -> schoolId = requestedSchoolId;
             case "SCHOOL_ADMIN" -> {
@@ -200,10 +186,17 @@ public class LeaveCorrectionService {
                 }
                 guardianId = principal.guardianId();
             }
+            case "STUDENT" -> {
+                schoolId = scopedSchool(principal, requestedSchoolId);
+                if (principal.studentId() == null) {
+                    throw ApiException.forbidden("当前学生账号缺少学生档案");
+                }
+                studentId = principal.studentId();
+            }
             default -> throw ApiException.forbidden("当前角色不能查看请假申请");
         }
         return mapper.listLeaveRequests(
-                schoolId, teacherId, guardianId, offeringId, sessionId, status);
+                schoolId, teacherId, guardianId, studentId, offeringId, sessionId, status);
     }
 
     @Transactional
@@ -301,7 +294,7 @@ public class LeaveCorrectionService {
         PlatformPrincipal principal = currentUser.principal();
         if (!"SCHOOL_ADMIN".equals(principal.roleCode())
                 || principal.schoolId() == null) {
-            throw ApiException.forbidden("只有学校管理员可以审批考勤纠错");
+            throw ApiException.forbidden("只有教务管理员可以审批考勤纠错");
         }
         AttendanceCorrectionRecord initial = mapper.findCorrectionRecord(id);
         if (initial == null) {
@@ -399,6 +392,15 @@ public class LeaveCorrectionService {
                     throw ApiException.forbidden("只能查看已绑定学生的考勤修订历史");
                 }
             }
+            case "STUDENT" -> {
+                requireSameSchool(principal, attendance.getSchoolId());
+                if (principal.studentId() == null
+                        || mapper.countStudentAttendanceAccess(
+                                        attendanceId, principal.studentId())
+                                != 1) {
+                    throw ApiException.forbidden("只能查看本人的考勤修订历史");
+                }
+            }
             default -> throw ApiException.forbidden("当前角色不能查看考勤修订历史");
         }
         return mapper.listAttendanceRevisions(attendanceId);
@@ -474,6 +476,16 @@ public class LeaveCorrectionService {
         return principal;
     }
 
+    private PlatformPrincipal requireStudent() {
+        PlatformPrincipal principal = currentUser.principal();
+        if (!"STUDENT".equals(principal.roleCode())
+                || principal.studentId() == null
+                || principal.schoolId() == null) {
+            throw ApiException.forbidden("当前账号不是有效学生账号");
+        }
+        return principal;
+    }
+
     private Long scopedSchool(PlatformPrincipal principal, Long requestedSchoolId) {
         if (principal.schoolId() == null) {
             throw ApiException.forbidden("当前账号缺少学校数据权限");
@@ -500,7 +512,7 @@ public class LeaveCorrectionService {
                 || locked.getOfferingId() != initial.getOfferingId()
                 || locked.getSessionId() != initial.getSessionId()
                 || locked.getStudentId() != initial.getStudentId()
-                || locked.getGuardianId() != initial.getGuardianId()
+                || !Objects.equals(locked.getGuardianId(), initial.getGuardianId())
                 || session.getOfferingId() != locked.getOfferingId()) {
             throw ApiException.conflict(
                     "LEAVE_CHANGED", "请假申请归属已变化，请刷新后重试");

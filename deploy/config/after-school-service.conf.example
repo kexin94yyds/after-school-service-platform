@@ -12,8 +12,8 @@ APP_CORS_ALLOWED_ORIGIN='https://after-school.example'
 RECTIFICATION_MATERIAL_DIR=/var/lib/after-school-service/rectification-materials
 
 # Automatic supervision scan. The cron is a Spring six-field expression and
-# must stay quoted because it contains spaces. Manual scans remain available
-# to regulator accounts even when the scheduled task is disabled.
+# must stay quoted because it contains spaces. Four-role accounts only consume
+# same-school alert results; the historical manual regulator endpoint is inactive.
 SUPERVISION_SCAN_ENABLED=true
 SUPERVISION_SCAN_CRON='0 0 2 * * *'
 SUPERVISION_SCAN_ZONE=Asia/Shanghai
@@ -25,5 +25,5 @@ JAVA_TOOL_OPTIONS='-XX:MaxRAMPercentage=70.0 -XX:+ExitOnOutOfMemoryError -Dfile.
 
 # DB_PASSWORD must not be placed here. The systemd unit imports the root-only
 # /etc/after-school-service/db-password file as a Spring config-tree credential.
-# One-time regulator bootstrap values are documented separately and must be
+# One-time school-admin bootstrap values are documented separately and must be
 # removed immediately after the first successful login.

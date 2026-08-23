@@ -66,9 +66,9 @@ class EnrollmentServiceTest {
         when(mapper.lockSchoolEnrollment(30, 1)).thenReturn(lockedRecord);
         when(mapper.cancelEnrollment(30, null, 1L, 11)).thenReturn(1);
         when(mapper.decrementCapacity(20)).thenReturn(1);
-        when(mapper.findEnrollmentView(20, 10)).thenReturn(enrollmentView());
+        when(mapper.findEnrollmentView(20, 10)).thenReturn(guardianEnrollmentView());
         when(mapper.insertEnrollmentAction(
-                        1, 30, 20, 10, 8, "CANCEL", null, 11, "SCHOOL_ADMIN"))
+                        1, 30, 20, 10, 8L, "CANCEL", null, 11, "SCHOOL_ADMIN"))
                 .thenReturn(1);
 
         service.cancel(30);
@@ -84,11 +84,8 @@ class EnrollmentServiceTest {
     }
 
     @Test
-    void guardianCannotCancelEnrollmentAfterOwnershipChangesWhileWaitingForLocks() {
-        PlatformPrincipal principal = mock(PlatformPrincipal.class);
-        when(principal.id()).thenReturn(21L);
-        when(principal.roleCode()).thenReturn("GUARDIAN");
-        when(principal.guardianId()).thenReturn(8L);
+    void studentCannotCancelEnrollmentAfterOwnershipChangesWhileWaitingForLocks() {
+        PlatformPrincipal principal = studentPrincipal();
         when(currentUser.principal()).thenReturn(principal);
 
         EnrollmentRecord initialRecord = new EnrollmentRecord();
@@ -96,31 +93,31 @@ class EnrollmentServiceTest {
         initialRecord.setOfferingId(20);
         initialRecord.setStudentId(10);
         initialRecord.setStatus("ENROLLED");
-        when(mapper.findScopedEnrollment(30, 8)).thenReturn(initialRecord);
-        when(mapper.lockGuardianStudent(10, 8)).thenReturn(new EnrollmentStudent());
+        when(mapper.findStudentEnrollment(30, 10)).thenReturn(initialRecord);
+        when(mapper.lockStudent(10)).thenReturn(new EnrollmentStudent());
         when(mapper.lockOffering(20)).thenReturn(new EnrollmentOffering());
-        // A different guardian reactivated the row before this transaction acquired
+        // A different actor changed the row before this transaction acquired
         // the shared student/offering locks, so the scoped locking read no longer matches.
-        when(mapper.lockScopedEnrollment(30, 8)).thenReturn(null);
+        when(mapper.lockStudentEnrollment(30, 10)).thenReturn(null);
 
         assertThatThrownBy(() -> service.cancel(30))
                 .isInstanceOf(ApiException.class)
                 .extracting(exception -> ((ApiException) exception).code())
                 .isEqualTo("ENROLLMENT_CHANGED");
 
-        verify(mapper, never()).cancelEnrollment(30, 8L, null, 21);
+        verify(mapper, never()).cancelEnrollment(30, null, null, 21);
         verify(mapper, never()).decrementCapacity(20);
     }
 
     @Test
     void rejectsEnrollmentAfterAnActualFirstSessionWasMovedEarlierThanTheTemplate() {
-        PlatformPrincipal principal = guardianPrincipal();
+        PlatformPrincipal principal = studentPrincipal();
         when(currentUser.principal()).thenReturn(principal);
         EnrollmentOffering offering = offering();
         offering.setStartDate(LocalDate.of(2026, 9, 15));
         when(mapper.lockOffering(20)).thenReturn(offering);
         when(mapper.findOffering(20)).thenReturn(offering);
-        when(mapper.lockGuardianStudent(10, 8)).thenReturn(student());
+        when(mapper.lockStudent(10)).thenReturn(student());
         when(mapper.findFirstValidSessionStart(20))
                 .thenReturn(LocalDateTime.of(2026, 9, 10, 15, 0));
 
@@ -131,41 +128,41 @@ class EnrollmentServiceTest {
         InOrder locks = inOrder(mapper);
         locks.verify(mapper).lockOffering(20);
         locks.verify(mapper).findOffering(20);
-        locks.verify(mapper).lockGuardianStudent(10, 8);
+        locks.verify(mapper).lockStudent(10);
         verify(mapper, never()).incrementCapacity(20);
     }
 
     @Test
     void usesTemplateFirstSessionOnlyWhenNoEffectiveSessionExists() {
-        PlatformPrincipal principal = guardianPrincipal();
+        PlatformPrincipal principal = studentPrincipal();
         when(currentUser.principal()).thenReturn(principal);
         EnrollmentOffering offering = offering();
         offering.setStartDate(LocalDate.of(2026, 9, 15));
         when(mapper.lockOffering(20)).thenReturn(offering);
         when(mapper.findOffering(20)).thenReturn(offering);
-        when(mapper.lockGuardianStudent(10, 8)).thenReturn(student());
+        when(mapper.lockStudent(10)).thenReturn(student());
         when(mapper.findFirstValidSessionStart(20)).thenReturn(null);
         when(mapper.incrementCapacity(20)).thenReturn(1);
         when(mapper.findEnrollmentView(20, 10)).thenReturn(enrollmentView());
         when(mapper.insertEnrollmentAction(
-                        1, 30, 20, 10, 8, "ENROLL", null, 21, "GUARDIAN"))
+                        1, 30, 20, 10, null, "ENROLL", null, 21, "STUDENT"))
                 .thenReturn(1);
 
         service.enroll(new EnrollmentController.EnrollmentRequest(10, 20));
 
         verify(mapper).findFirstValidSessionStart(20);
-        verify(mapper).insertEnrollment(1, 20, 10, 8);
+        verify(mapper).insertEnrollment(1, 20, 10, null);
     }
 
     @Test
     void rejectsEnrollmentWhenActualScheduleConflictQueryFindsAnotherCourse() {
-        PlatformPrincipal principal = guardianPrincipal();
+        PlatformPrincipal principal = studentPrincipal();
         when(currentUser.principal()).thenReturn(principal);
         EnrollmentOffering offering = offering();
         offering.setStartDate(LocalDate.of(2026, 9, 15));
         when(mapper.lockOffering(20)).thenReturn(offering);
         when(mapper.findOffering(20)).thenReturn(offering);
-        when(mapper.lockGuardianStudent(10, 8)).thenReturn(student());
+        when(mapper.lockStudent(10)).thenReturn(student());
         when(mapper.findFirstValidSessionStart(20))
                 .thenReturn(LocalDateTime.of(2026, 9, 15, 16, 30));
         when(mapper.countScheduleConflicts(10, 20)).thenReturn(1);
@@ -179,14 +176,14 @@ class EnrollmentServiceTest {
 
     @Test
     void readsClosedParentStatusAfterLockingOfferingAndRejectsEnrollment() {
-        PlatformPrincipal principal = guardianPrincipal();
+        PlatformPrincipal principal = studentPrincipal();
         when(currentUser.principal()).thenReturn(principal);
         EnrollmentOffering lockedOffering = offering();
         EnrollmentOffering offeringWithParentState = offering();
         offeringWithParentState.setTermStatus("CLOSED");
         when(mapper.lockOffering(20)).thenReturn(lockedOffering);
         when(mapper.findOffering(20)).thenReturn(offeringWithParentState);
-        when(mapper.lockGuardianStudent(10, 8)).thenReturn(student());
+        when(mapper.lockStudent(10)).thenReturn(student());
 
         assertCode(
                 "TERM_CLOSED",
@@ -195,21 +192,21 @@ class EnrollmentServiceTest {
         InOrder operations = inOrder(mapper);
         operations.verify(mapper).lockOffering(20);
         operations.verify(mapper).findOffering(20);
-        operations.verify(mapper).lockGuardianStudent(10, 8);
+        operations.verify(mapper).lockStudent(10);
         verify(mapper, never()).incrementCapacity(20);
     }
 
     @Test
     void switchesEnrollmentAtomicallyAndRecordsBothSides() {
-        PlatformPrincipal principal = guardianPrincipal();
+        PlatformPrincipal principal = studentPrincipal();
         when(currentUser.principal()).thenReturn(principal);
         EnrollmentRecord oldRecord = new EnrollmentRecord();
         oldRecord.setId(30);
         oldRecord.setOfferingId(20);
         oldRecord.setStudentId(10);
         oldRecord.setStatus("ENROLLED");
-        when(mapper.findScopedEnrollment(30, 8)).thenReturn(oldRecord);
-        when(mapper.lockScopedEnrollment(30, 8)).thenReturn(oldRecord);
+        when(mapper.findStudentEnrollment(30, 10)).thenReturn(oldRecord);
+        when(mapper.lockStudentEnrollment(30, 10)).thenReturn(oldRecord);
 
         EnrollmentOffering oldOffering = offering();
         oldOffering.setStartDate(LocalDate.of(2026, 9, 15));
@@ -220,42 +217,37 @@ class EnrollmentServiceTest {
         when(mapper.lockOffering(21)).thenReturn(newOffering);
         when(mapper.findOffering(20)).thenReturn(oldOffering);
         when(mapper.findOffering(21)).thenReturn(newOffering);
-        when(mapper.lockGuardianStudent(10, 8)).thenReturn(student());
-        when(mapper.cancelEnrollment(30, 8L, null, 21)).thenReturn(1);
+        when(mapper.lockStudent(10)).thenReturn(student());
+        when(mapper.cancelEnrollment(30, null, null, 21)).thenReturn(1);
         when(mapper.decrementCapacity(20)).thenReturn(1);
         when(mapper.incrementCapacity(21)).thenReturn(1);
         Map<String, Object> oldView = enrollmentView();
-        Map<String, Object> newView = Map.of(
-                "id", 31L,
-                "schoolId", 1L,
-                "offeringId", 21L,
-                "studentId", 10L,
-                "guardianId", 8L);
+        Map<String, Object> newView = enrollmentView(31L, 21L);
         when(mapper.findEnrollmentView(20, 10)).thenReturn(oldView);
         when(mapper.findEnrollmentView(21, 10)).thenReturn(newView);
         when(mapper.insertEnrollmentAction(
-                        1, 30, 20, 10, 8, "SWITCH_OUT", 31L, 21, "GUARDIAN"))
+                        1, 30, 20, 10, null, "SWITCH_OUT", 31L, 21, "STUDENT"))
                 .thenReturn(1);
         when(mapper.insertEnrollmentAction(
-                        1, 31, 21, 10, 8, "SWITCH_IN", 30L, 21, "GUARDIAN"))
+                        1, 31, 21, 10, null, "SWITCH_IN", 30L, 21, "STUDENT"))
                 .thenReturn(1);
 
         Map<String, Object> result = service.switchEnrollment(30, 21);
 
         org.assertj.core.api.Assertions.assertThat(result).containsEntry("id", 31L);
-        verify(mapper).cancelEnrollment(30, 8L, null, 21);
-        verify(mapper).insertEnrollment(1, 21, 10, 8);
+        verify(mapper).cancelEnrollment(30, null, null, 21);
+        verify(mapper).insertEnrollment(1, 21, 10, null);
         verify(mapper).insertEnrollmentAction(
-                1, 30, 20, 10, 8, "SWITCH_OUT", 31L, 21, "GUARDIAN");
+                1, 30, 20, 10, null, "SWITCH_OUT", 31L, 21, "STUDENT");
         verify(mapper).insertEnrollmentAction(
-                1, 31, 21, 10, 8, "SWITCH_IN", 30L, 21, "GUARDIAN");
+                1, 31, 21, 10, null, "SWITCH_IN", 30L, 21, "STUDENT");
     }
 
-    private PlatformPrincipal guardianPrincipal() {
+    private PlatformPrincipal studentPrincipal() {
         PlatformPrincipal principal = mock(PlatformPrincipal.class);
         when(principal.id()).thenReturn(21L);
-        when(principal.roleCode()).thenReturn("GUARDIAN");
-        when(principal.guardianId()).thenReturn(8L);
+        when(principal.roleCode()).thenReturn("STUDENT");
+        when(principal.studentId()).thenReturn(10L);
         return principal;
     }
 
@@ -291,12 +283,23 @@ class EnrollmentServiceTest {
     }
 
     private Map<String, Object> enrollmentView() {
-        return Map.of(
-                "id", 30L,
-                "schoolId", 1L,
-                "offeringId", 20L,
-                "studentId", 10L,
-                "guardianId", 8L);
+        return enrollmentView(30L, 20L);
+    }
+
+    private Map<String, Object> enrollmentView(long id, long offeringId) {
+        Map<String, Object> view = new java.util.LinkedHashMap<>();
+        view.put("id", id);
+        view.put("schoolId", 1L);
+        view.put("offeringId", offeringId);
+        view.put("studentId", 10L);
+        view.put("guardianId", null);
+        return view;
+    }
+
+    private Map<String, Object> guardianEnrollmentView() {
+        Map<String, Object> view = new java.util.LinkedHashMap<>(enrollmentView());
+        view.put("guardianId", 8L);
+        return view;
     }
 
     private void assertCode(String code, Runnable action) {

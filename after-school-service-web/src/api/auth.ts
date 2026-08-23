@@ -9,6 +9,7 @@ interface SessionUserResponse {
   role?: RoleCode
   roleCode?: RoleCode
   schoolId?: number | null
+  studentId?: number | null
   teacherId?: number | null
   guardianId?: number | null
   capabilities?: Record<string, boolean>
@@ -25,6 +26,7 @@ function normalizeSessionUser(data: SessionUserResponse): SessionUser {
     displayName: data.displayName || data.username,
     role,
     schoolId: data.schoolId ?? null,
+    studentId: data.studentId ?? null,
     teacherId: data.teacherId ?? null,
     guardianId: data.guardianId ?? null,
     capabilities: data.capabilities,
@@ -36,8 +38,12 @@ export async function fetchCurrentUser(): Promise<SessionUser> {
   return normalizeSessionUser(response.data)
 }
 
-export async function login(username: string, password: string): Promise<void> {
-  await http.post('/auth/login', { username, password })
+export async function login(
+  username: string,
+  password: string,
+  expectedRole: RoleCode,
+): Promise<void> {
+  await http.post('/auth/login', { username, password, expectedRole })
 }
 
 export async function logout(): Promise<void> {

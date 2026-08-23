@@ -284,8 +284,8 @@ function emptyOfferingForm(): OfferingFormState {
 function planStatusLabel(status: PlanStatus): string {
   const labels: Record<PlanStatus, string> = {
     DRAFT: '草稿',
-    SUBMITTED: '待备案',
-    FILED: '已备案',
+    SUBMITTED: '待确认',
+    FILED: '已确认',
     RETURNED: '已退回',
     ACTIVE: '执行中',
     CLOSED: '已关闭',
@@ -389,7 +389,7 @@ function clearFieldError(key: string): void {
 
 function schoolId(): number {
   const id = session.user?.schoolId
-  if (!id) throw new ApiClientError('当前学校管理员账号未绑定学校。')
+  if (!id) throw new ApiClientError('当前教务管理员账号未绑定学校。')
   return id
 }
 
@@ -697,7 +697,7 @@ function validateOffering(): boolean {
       offeringForm.status === 'PUBLISHED' &&
       !['FILED', 'ACTIVE'].includes(plan.status)
     ) {
-      fieldErrors.planId = '发布只能使用已备案或执行中的服务计划'
+      fieldErrors.planId = '发布只能使用已确认或执行中的开课计划'
     }
   }
 
@@ -728,7 +728,7 @@ function validateOffering(): boolean {
       fieldErrors.termId = '发布前必须关联标准学期'
     }
     if (offeringForm.planId === null) {
-      fieldErrors.planId = '发布前必须选择已备案或执行中的计划'
+      fieldErrors.planId = '发布前必须选择已确认或执行中的计划'
     }
     if (offeringForm.roomId === null) {
       fieldErrors.roomId = '发布前必须选择启用中的标准教室'
@@ -896,7 +896,7 @@ onMounted(() => {
           <header class="entity-panel-header">
             <div>
               <h2>开班</h2>
-              <p>发布前必须关联标准学期、已备案计划和启用教室，服务端会再次强制校验。</p>
+              <p>发布前必须关联标准学期、已确认计划和启用教室，服务端会再次强制校验。</p>
             </div>
             <div class="offering-toolbar">
               <el-select
@@ -1110,7 +1110,7 @@ onMounted(() => {
       />
       <el-alert
         v-if="editingLegacyOffering"
-        title="这是旧版文本开班，可原样保存；再次发布前需补齐标准学期、已备案计划和启用教室。"
+        title="这是旧版文本开班，可原样保存；再次发布前需补齐标准学期、已确认计划和启用教室。"
         type="info"
         :closable="false"
         show-icon
@@ -1134,7 +1134,7 @@ onMounted(() => {
           <header>
             <div>
               <span>标准资源链</span>
-              <strong id="resource-chain-title">学期 → 备案计划 → 教室</strong>
+              <strong id="resource-chain-title">学期 → 开课计划 → 教室</strong>
             </div>
             <small>发布时三项必须完整且状态有效</small>
           </header>
@@ -1257,7 +1257,7 @@ onMounted(() => {
                 {{
                   offeringForm.termId === null
                     ? '先选择标准学期'
-                    : '草稿可暂不关联；发布只接受已备案或执行中计划'
+                    : '草稿可暂不关联；发布只接受已确认或执行中计划'
                 }}
               </p>
             </article>

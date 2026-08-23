@@ -360,7 +360,7 @@ public class CourseService {
             long schoolId, CourseController.OfferingRequest request) {
         AcademicTerm term = null;
         if (request.termId() != null) {
-            term = academicMapper.lockTerm(request.termId());
+            term = academicMapper.lockTerm(request.termId(), schoolId);
             if (term == null) {
                 throw ApiException.badRequest("INVALID_TERM", "学期不存在");
             }

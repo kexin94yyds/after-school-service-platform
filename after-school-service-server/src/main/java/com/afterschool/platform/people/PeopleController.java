@@ -102,6 +102,8 @@ public class PeopleController {
             long classId,
             @NotBlank @Size(max = 32) String studentNo,
             @NotBlank @Size(max = 64) String fullName,
+            @NotBlank @Size(max = 64) String username,
+            @Size(min = 12, max = 72) String password,
             @Pattern(regexp = "MALE|FEMALE|OTHER") String gender,
             LocalDate dateOfBirth,
             @NotBlank @Pattern(regexp = "ACTIVE|INACTIVE") String status) {}
